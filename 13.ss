@@ -253,7 +253,7 @@
 ;                   |
 ;-------------------+
 
-(define *prim-proc-names* '(+ - * add1 sub1 cons =))
+(define *prim-proc-names* '(+ - * / add1 sub1 cons = eq? eqv? equal? length list->vector vector->list >= <= car cdr caar cadr cadar caddr list null? list? pair? vector? number? symbol? procedure? zero? not set-car! set-cdr!))
 
 (define init-env         ; for now, our initial global environment only contains 
 	(extend-env 
@@ -294,6 +294,9 @@
 					(let ([proc-value (eval-exp (car body) env)] 
 						[args (eval-rands (cdr body) env)])
 						(apply-proc proc-value args))]
+				[let-exp (vars vals body)
+					(eval-body body
+						(extend-env vars (eval-rands vals env) env))]
                 [lambda-exp (ids body)
                     (closure ids body env)]
 				[else (eopl:error 'eval-exp "Bad abstract syntax: ~a" exp)]))))
@@ -334,10 +337,37 @@
 			[(+) (apply + args)]
 			[(-) (apply - args)]
 			[(*) (apply * args)]
+			[(/) (apply / args)]
 			[(add1) (+ (1st args) 1)]
 			[(sub1) (- (1st args) 1)]
 			[(cons) (cons (1st args) (2nd args))]
 			[(=) (= (1st args) (2nd args))]
+			[(eq?) (eq? (1st args) (2nd args))]
+			[(eqv?) (eqv? (1st args) (2nd args))]
+			[(equal?) (equal? (1st args) (2nd args))]
+			[(length) (length (1st args))]
+			[(list->vector) (list->vector (1st args))]
+			[(vector->list) (vector->list (1st args))]
+			[(>=) (>= (1st args) (2nd args))]
+			[(<=) (<= (1st args) (2nd args))]
+			[(car) (car (1st args))]
+			[(cdr) (cdr (1st args))]
+			[(caar) (caar (1st args))]
+			[(cadr) (cadr (1st args))]
+			[(cadar) (cadar (1st args))]
+			[(caddr) (caddr (1st args))]
+			[(list) (apply list args)]
+			[(null?) (null? (1st args))]
+			[(list?) (list? (1st args))]
+			[(pair?) (list? (1st args))]
+			[(vector?) (vector? (1st args))]
+			[(number?) (number? (1st args))]
+			[(symbol?) (symbol? (1st args))]
+			[(procedure?) (proc-val? (1st args))]
+			[(zero?) (zero? (1st args))]
+			[(not) (not (1st args))]
+			[(set-car!) (set-car! (1st args) (2nd args))]
+			[(set-cdr!) (set-cdr! (1st args) (2nd args))]
 			[else (error 'apply-prim-proc "Bad primitive procedure name: ~s" prim-proc)])))
 
 (define rep      ; "read-eval-print" loop.
