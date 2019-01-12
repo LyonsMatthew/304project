@@ -61,6 +61,13 @@
 ; datatype for procedures.  At first there is only one
 ; kind of procedure, but more kinds will be added later.
 
+(define-datatype environment environment?
+	(empty-env-record)
+	(extended-env-record
+		(syms (list-of symbol?))
+		(vals (list-of scheme-value?))
+		(env environment?)))
+
 (define-datatype proc-val proc-val?
 	[prim-proc
 		(name symbol?)]
@@ -68,14 +75,6 @@
         (ids (list-of symbol?))
         (body (list-of expression?))
         (env environment?)])
-	 
-
-(define-datatype environment environment?
-	(empty-env-record)
-	(extended-env-record
-		(syms (list-of symbol?))
-		(vals (list-of scheme-value?))
-		(env environment?)))
 
 
 	
