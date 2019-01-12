@@ -16,6 +16,8 @@
 		(id symbol?)]
 	[tiny-list-exp
 		(body expression?)]
+    [quote-exp
+        (body expression?)]
 	[lit-exp
 		(datum (lambda (x) (ormap (lambda (pred) (pred x)) (list number? vector? boolean? symbol? string? pair? null?))))]
 	[lambda-exp-improper-arg
@@ -61,7 +63,11 @@
 
 (define-datatype proc-val proc-val?
 	[prim-proc
-		(name symbol?)])
+		(name symbol?)]
+    [closure
+        (ids (list-of symbol?))
+        (body (list-of expression?))
+        (env environment?)])
 	 
 
 (define-datatype environment environment?
@@ -91,7 +97,6 @@
 	(lambda (datum)
 		(cond
 			[(symbol? datum) (var-exp datum)]
-			[(lambda (x) (ormap (lambda (pred) (pred x)) (list number? vector? boolean? symbol? string? pair? null?))) (lit-exp datum)]
 			[(list? datum)
 				(cond
 					[(eqv? (car datum) 'lambda)
@@ -135,10 +140,15 @@
 						(cond
 							[(not (= (length datum) 4)) (eopl:error 'parse-exp "if-expression ~s does not have (only) test, then, and else" datum)]
 							[else (if-exp (parse-exp (2nd datum)) (parse-exp (3rd datum)) (parse-exp (4th datum)))])]
-					[else 
+					[(eqv? (car datum) 'quote)
+                        (if (null? (cadr datum))
+                            (lit-exp '())
+                            (quote-exp (lit-exp (cadr datum))))]
+                    [else 
 						(if (null? (cdr datum))
 							(tiny-list-exp (parse-exp (1st datum)))
 							(app-exp (map parse-exp datum)))])]
+            [(lambda (x) (ormap (lambda (pred) (pred x)) (list number? vector? boolean? symbol? string? pair? null?))) (lit-exp datum)]
 			[(vector? datum) (vector-exp datum)]
 			[else (eopl:error 'parse-exp "bad expression: ~s" datum)])))
 
@@ -243,6 +253,13 @@
 ;                   |
 ;-------------------+
 
+(define *prim-proc-names* '(+ - * add1 sub1 cons =))
+
+(define init-env         ; for now, our initial global environment only contains 
+	(extend-env 
+		*prim-proc-names*
+		(map prim-proc *prim-proc-names*)
+		(empty-env)))
 
 (define global-env init-env)
 
@@ -257,10 +274,8 @@
 	(let ([identity-proc (lambda (x) x)])
 		(lambda (exp env)
 			(cases expression exp
-				[lit-exp (datum)
-					(if (list? datum)
-						(cadr datum)
-						datum)]
+				[lit-exp (datum) datum]
+                [quote-exp (body) (eval-exp body env)]
 				[var-exp (id)
 					(apply-env env
 						id
@@ -271,10 +286,16 @@
 								identity-proc
 								(lambda ()
 									(error 'apply-env "variable ~s is not bound" id)))))]
+                [if-exp (condition body-true body-false)
+                    (if (eval-exp condition env)
+                        (eval-exp body-true env)
+                        (eval-exp body-false env))]
 				[app-exp (body)
 					(let ([proc-value (eval-exp (car body) env)] 
 						[args (eval-rands (cdr body) env)])
 						(apply-proc proc-value args))]
+                [lambda-exp (ids body)
+                    (closure ids body env)]
 				[else (eopl:error 'eval-exp "Bad abstract syntax: ~a" exp)]))))
 
 ; evaluate the list of operands, putting results into a list
@@ -283,6 +304,14 @@
 	(lambda (rands env)
 		(map (lambda (e) (eval-exp e env) )
 			rands)))
+            
+(define eval-body
+    (lambda (body env)
+        (if (null? (cdr body))
+            (eval-exp (car body) env)
+            (begin
+                (eval-exp (car body) env)
+                (eval-body (cdr body) env)))))
 
 ;  Apply a procedure to its arguments.
 ;  At this point, we only have primitive procedures.  
@@ -292,15 +321,9 @@
 	(lambda (proc-value args)
 		(cases proc-val proc-value
 			[prim-proc (op) (apply-prim-proc op args)]
+            [closure (ids body env)
+                (eval-body body (extend-env ids args env))]
 			[else (eopl:error 'apply-proc "Attempt to apply bad procedure: ~s" proc-value)])))
-
-(define *prim-proc-names* '(+ - * add1 sub1 cons =))
-
-(define init-env         ; for now, our initial global environment only contains 
-	(extend-env 
-		*prim-proc-names*
-		(map prim-proc *prim-proc-names*)
-		(empty-env)))
 
 ; Usually an interpreter must define each 
 ; built-in procedure individually.  We are "cheating" a little bit.
