@@ -326,7 +326,7 @@
 								identity-proc
 								(lambda ()
 									(error 'apply-env "variable ~s is not bound" id)))))]
-				[tiny-list-exp (body) (eval-exp body env)]
+				[tiny-list-exp (body) body]
                 [if-exp (condition body-true body-false)
                     (if (eval-exp condition env)
                         (eval-exp body-true env)
@@ -399,7 +399,7 @@
     (lambda (proc vals)
         (if (null? vals)
             '()
-            (cons (proc (car vals)) (custom-map proc (cdr vals))))))
+            (cons (apply-proc proc (list (car vals))) (custom-map proc (cdr vals))))))
 
 (define apply-prim-proc
 	(lambda (prim-proc args)
@@ -438,10 +438,7 @@
 			[(not) (not (1st args))]
 			[(set-car!) (set-car! (1st args) (2nd args))]
 			[(set-cdr!) (set-cdr! (1st args) (2nd args))]
-			[(map) (custom-map (lambda (x) (apply-proc (1st args) 
-                (if (list? x)
-                    x
-                    (parse-exp x)))) (cadr args))]
+			[(map) (custom-map (1st args) (2nd args))]
 			[(apply) (apply apply-proc (1st args) (cdr args))]
 			[(list-ref) (list-ref (1st args) (2nd args))]
 			[(vector-ref) (vector-ref (1st args) (2nd args))]
