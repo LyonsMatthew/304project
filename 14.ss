@@ -395,6 +395,12 @@
 ; Usually an interpreter must define each 
 ; built-in procedure individually.  We are "cheating" a little bit.
 
+(define custom-map
+    (lambda (proc vals)
+        (if (null? vals)
+            '()
+            (cons (proc (car vals)) (custom-map proc (cdr vals))))))
+
 (define apply-prim-proc
 	(lambda (prim-proc args)
 		(case prim-proc
@@ -432,7 +438,10 @@
 			[(not) (not (1st args))]
 			[(set-car!) (set-car! (1st args) (2nd args))]
 			[(set-cdr!) (set-cdr! (1st args) (2nd args))]
-			[(map) 499]
+			[(map) (custom-map (lambda (x) (apply-proc (1st args) 
+                (if (list? x)
+                    x
+                    (parse-exp x)))) (cadr args))]
 			[(apply) (apply apply-proc (1st args) (cdr args))]
 			[(list-ref) (list-ref (1st args) (2nd args))]
 			[(vector-ref) (vector-ref (1st args) (2nd args))]
