@@ -23,6 +23,10 @@
 	[lambda-exp-vararg
 		(ids symbol?)
 		(body (list-of expression?))]
+	[lambda-exp-improper
+		(ids (list-of symbol?))
+		(more-ids symbol?)
+		(body (list-of expression?))]
 	[lambda-exp
 		(ids list?)
 		(body (list-of expression?))]
@@ -47,6 +51,9 @@
 		(condition expression?)
 		(body-true expression?)
 		(body-false expression?)]
+	[if-pirate-exp
+		(condition expression?)
+		(body-true expression?)]
 	[app-exp
 		(body (list-of expression?))])
 
@@ -78,6 +85,11 @@
 	[closure-varargs
 		(ids symbol?)
 		(body (list-of expression?))
+		(env environment?)]
+	[closure-improper
+		(ids (list-of symbol?))
+		(more-ids symbol?)
+		(body (list-of expression?))
 		(env environment?)])
 
 
@@ -96,6 +108,18 @@
 (define 3rd caddr)
 (define 4th cadddr)
 
+(define get-proper-part
+	(lambda (ls)
+		(if (not (pair? ls))
+			'()
+			(cons (car ls) (get-proper-part (cdr ls))))))
+			
+(define get-improper-part
+	(lambda (ls)
+		(if (not (pair? ls))
+			ls
+			(get-improper-part (cdr ls)))))
+
 (define parse-exp         
 	(lambda (datum)
 		(cond
@@ -105,11 +129,12 @@
 					[(eqv? (car datum) 'lambda)
 						(cond
 							[(null? (cddr datum)) (eopl:error 'parse-exp "lambda-expression: incorrect length ~s" datum)]
-							[else (if (symbol? (2nd datum))
-									(lambda-exp-vararg (2nd datum) (map parse-exp (cddr datum)))
-									(if (not (andmap symbol? (2nd datum)))
+							[else (cond 
+									[(symbol? (2nd datum)) (lambda-exp-vararg (2nd datum) (map parse-exp (cddr datum)))]
+									[(list? (2nd datum)) (if (not (andmap symbol? (2nd datum)))
 										(eopl:error 'parse-exp "lambda's formal arguments ~s must all be symbols" datum)
-										(lambda-exp (2nd datum) (map parse-exp (cddr datum)))))])]
+										(lambda-exp (2nd datum) (map parse-exp (cddr datum))))]
+									[else (lambda-exp-improper (get-proper-part (2nd datum)) (get-improper-part (2nd datum)) (map parse-exp (cddr datum)))])])]
 					[(eqv? (car datum) 'let)
 						(cond
 							[(null? (cddr datum)) (eopl:error 'parse-exp "~s-expression has incorrect length ~s" datum)]
@@ -141,7 +166,10 @@
 							[else (set!-exp (2nd datum) (3rd datum))])]
 					[(eqv? (car datum) 'if)
 						(cond
-							[(not (= (length datum) 4)) (eopl:error 'parse-exp "if-expression ~s does not have (only) test, then, and else" datum)]
+							[(not (= (length datum) 4))
+								(if (= (length datum) 3)
+									(if-pirate-exp (parse-exp (2nd datum)) (parse-exp (3rd datum)))
+									(eopl:error 'parse-exp "if-expression ~s does not have (only) test, then, and else" datum))]
 							[else (if-exp (parse-exp (2nd datum)) (parse-exp (3rd datum)) (parse-exp (4th datum)))])]
 					[(eqv? (car datum) 'quote)
                         (if (null? (cadr datum))
@@ -162,6 +190,7 @@
 			[tiny-list-exp (body) (list (unparse-exp body))]
 			[lit-exp (id) id]
 			[lambda-exp-vararg (id body) (append (list 'lambda id) (map unparse-exp body))]
+			[lambda-exp-improper (ids more-ids body) (append (list 'lambda (build-improper-lambda ids more-ids)) (map unparse-exp body))]
 			[lambda-exp (id body) (append (list 'lambda id) (map unparse-exp body))]
 			[let-exp (vars vals body) (append (list 'let (map list vars (map unparse-exp vals))) (map unparse-exp body))]
 			[let*-exp (vars vals body) (append (list 'let* (map list vars (map unparse-exp vals))) (map unparse-exp body))]
@@ -169,7 +198,15 @@
 			[vector-exp (id) id]
 			[set!-exp (var val) (list 'set! var val)]
 			[if-exp (condition body-true body-false) (list 'if (unparse-exp condition) (unparse-exp body-true) (unparse-exp body-false))]
+			[if-pirate-exp (condition body-true) (list 'if (unparse-exp condition) (unparse-exp body-true))]
+			[quote-exp (body) body]
 			[app-exp (body) (map unparse-exp body)])))
+			
+(define build-improper-lambda
+	(lambda (ids more-ids)
+		(if (null? ids)
+			more-ids
+			(cons (car ids) (build-improper-lambda (cdr ids) more-ids)))))
 
 
 
@@ -256,7 +293,7 @@
 ;                   |
 ;-------------------+
 
-(define *prim-proc-names* '(+ - * / add1 sub1 cons = eq? eqv? equal? length list->vector vector->list >= <= car cdr caar cadr cadar caddr list null? list? pair? vector? number? symbol? procedure? zero? not set-car! set-cdr! map apply vector-ref list-ref vector))
+(define *prim-proc-names* '(+ - * / add1 sub1 cons = eq? eqv? equal? length list->vector vector->list >= <= car cdr caar cadr cadar caddr list null? list? pair? vector? number? symbol? procedure? zero? not set-car! set-cdr! map apply vector-ref list-ref vector > < vector-set!))
 
 (define init-env         ; for now, our initial global environment only contains 
 	(extend-env 
@@ -294,6 +331,9 @@
                     (if (eval-exp condition env)
                         (eval-exp body-true env)
                         (eval-exp body-false env))]
+				[if-pirate-exp (condition body-true)
+					(if (eval-exp condition env)
+						(eval-exp body-true env))]
 				[app-exp (body)
 					(let ([proc-value (eval-exp (car body) env)] 
 						[args (eval-rands (cdr body) env)])
@@ -305,6 +345,8 @@
                     (closure ids body env)]
 				[lambda-exp-vararg (ids body)
 					(closure-varargs ids body env)]
+				[lambda-exp-improper (ids more-ids body)
+					(closure-improper ids more-ids body env)]
 				[else (eopl:error 'eval-exp "Bad abstract syntax: ~a" exp)]))))
 
 ; evaluate the list of operands, putting results into a list
@@ -333,8 +375,22 @@
             [closure (ids body env)
                 (eval-body body (extend-env ids args env))]
 			[closure-varargs (ids body env)
-				(eval-body body (extend-env (list ids) args env))]
+				(eval-body body (extend-env (list ids) (list args) env))]
+			[closure-improper (ids more-ids body env)
+				(eval-body body (extend-env (append ids (list more-ids)) (append (get-proper-args (length ids) args) (list (get-improper-args (length ids) args))) env))]
 			[else (eopl:error 'apply-proc "Attempt to apply bad procedure: ~s" proc-value)])))
+			
+(define get-proper-args
+	(lambda (num args)
+		(if (= num 0)
+			'()
+			(cons (car args) (get-proper-args (- num 1) (cdr args))))))
+			
+(define get-improper-args
+	(lambda (num args)
+		(if (= num 0)
+			args
+			(get-improper-args (- num 1) (cdr args)))))
 
 ; Usually an interpreter must define each 
 ; built-in procedure individually.  We are "cheating" a little bit.
@@ -376,11 +432,14 @@
 			[(not) (not (1st args))]
 			[(set-car!) (set-car! (1st args) (2nd args))]
 			[(set-cdr!) (set-cdr! (1st args) (2nd args))]
-			[(map) (apply-proc (1st args) (cdr args))]
-			[(apply) (apply-proc (1st args) (cdr args))]
+			[(map) 499]
+			[(apply) (apply apply-proc (1st args) (cdr args))]
 			[(list-ref) (list-ref (1st args) (2nd args))]
 			[(vector-ref) (vector-ref (1st args) (2nd args))]
 			[(vector) (apply vector args)]
+			[(<) (< (1st args) (2nd args))]
+			[(>) (> (1st args) (2nd args))]
+			[(vector-set!) (vector-set! (1st args) (2nd args) (3rd args))]
 			[else (error 'apply-prim-proc "Bad primitive procedure name: ~s" prim-proc)])))
 
 (define rep      ; "read-eval-print" loop.
