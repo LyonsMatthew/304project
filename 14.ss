@@ -380,7 +380,7 @@
 						(if-pirate-exp (car conditions) (car bodies))
 						(if-exp (car conditions) (car bodies) (cond-to-if (cdr conditions) (cdr bodies)))))]
 			[let-exp (vars vals body)
-				(app-exp (append (list (lambda-exp vars (map syntax-expand body))) vals))]
+				(app-exp (append (list (lambda-exp vars (map syntax-expand body))) (map syntax-expand vals)))]
 			[let*-exp (vars vals body)
 				(syntax-expand (let*-builder vars vals body))]
 			[begin-exp (bodies)
@@ -397,9 +397,9 @@
 					(parse-exp #f)
 					(let or-to-if ([conditions conditions])
 						(if (null? (cdr conditions))
-                            (syntax-expand (let-exp (list (parse-exp 'result)) (list (car conditions))
+                            (syntax-expand (let-exp (list 'result) (list (car conditions))
                                 (list (if-exp (parse-exp 'result) (parse-exp 'result) (lit-exp #f)))))
-                            (syntax-expand (let-exp (list (parse-exp 'result)) (list (car conditions))
+                            (syntax-expand (let-exp (list 'result) (list (car conditions))
                                 (list (if-exp (parse-exp 'result) (parse-exp 'result) (or-to-if (cdr conditions)))))))))]
 			[app-exp (bodies) (app-exp (map syntax-expand bodies))]
 			[lambda-exp (ids body) (lambda-exp ids (map syntax-expand body))]
