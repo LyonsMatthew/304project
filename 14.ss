@@ -411,9 +411,22 @@
 
 
 
-
-
-
+; In-Order map
+(define in-order-map
+    (lambda (proc ls)
+        (if (null? ls)
+            '()
+            (let* ([one (proc (car ls))] [two (in-order-map proc (cdr ls))])
+                (cons one two)))))
+            
+(define while-proc
+    (lambda (condition bodies env)
+        (if (eval-exp condition env)
+            (begin
+                (in-order-map (lambda (b) (eval-exp b env)) bodies)
+                (while-proc condition bodies env)
+                (void))
+            (void))))
 
 
 
@@ -478,12 +491,7 @@
 				[lambda-exp-improper (ids more-ids body)
 					(closure-improper ids more-ids body env)]
 				[while-exp (condition bodies)
-					(let while ()
-						(if (eval-exp condition env)
-							(begin
-								(map (lambda (b) (eval-exp b env)) bodies)
-								(while))
-							(void)))]
+					(while-proc condition bodies env)]
 				[else (eopl:error 'eval-exp "Bad abstract syntax: ~a" exp)]))))
 
 ; evaluate the list of operands, putting results into a list
