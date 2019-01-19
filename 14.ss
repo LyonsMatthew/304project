@@ -343,7 +343,7 @@
 
 (define case-to-if
 	(lambda (val conditions bodies)
-		(indv-case-to-if val conditions bodies (car conditions))))
+			(indv-case-to-if val conditions bodies (get-condition (car conditions)))))
 
 (define indv-case-to-if
 	(lambda (val conditions bodies icondition-list)
@@ -476,7 +476,7 @@
 				[lambda-exp-improper (ids more-ids body)
 					(closure-improper ids more-ids body env)]
 				[while-exp (condition bodies)
-					(trace-let while ()
+					(let while ()
 						(if (eval-exp condition env)
 							(begin
 								(map (lambda (b) (eval-exp b env)) bodies)
