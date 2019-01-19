@@ -397,8 +397,10 @@
 					(parse-exp #f)
 					(let or-to-if ([conditions conditions])
 						(if (null? (cdr conditions))
-							(syntax-expand (if-exp (car conditions) (car conditions) (lit-exp #f)))
-							(syntax-expand (if-exp (car conditions) (car conditions) (or-to-if (cdr conditions)))))))]
+                            (syntax-expand (let-exp (list (parse-exp 'result)) (list (car conditions))
+                                (list (if-exp (parse-exp 'result) (parse-exp 'result) (lit-exp #f)))))
+                            (syntax-expand (let-exp (list (parse-exp 'result)) (list (car conditions))
+                                (list (if-exp (parse-exp 'result) (parse-exp 'result) (or-to-if (cdr conditions)))))))))]
 			[app-exp (bodies) (app-exp (map syntax-expand bodies))]
 			[lambda-exp (ids body) (lambda-exp ids (map syntax-expand body))]
 			[if-exp (condition body-true body-false) (if-exp (syntax-expand condition) (syntax-expand body-true) (syntax-expand body-false))]
