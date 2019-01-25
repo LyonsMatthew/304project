@@ -239,7 +239,7 @@
 			[let*-exp (vars vals body) (append (list 'let* (map list vars (map unparse-exp vals))) (map unparse-exp body))]
 			[letrec-exp (vars vals body) (append (list 'letrec (map list vars (map unparse-exp vals))) (map unparse-exp body))]
 			[vector-exp (id) id]
-			[set!-exp (var val) (list 'set! var val)]
+			[set!-exp (var val) (list 'set! var (unparse-exp val))]
 			[if-exp (condition body-true body-false) (list 'if (unparse-exp condition) (unparse-exp body-true) (unparse-exp body-false))]
 			[if-pirate-exp (condition body-true) (list 'if (unparse-exp condition) (unparse-exp body-true))]
 			[cond-exp (conditions bodies) (append (list 'cond) (map (lambda (x y)
@@ -384,10 +384,9 @@
 				(syntax-expand (let*-builder vars vals body))]
 			[letrec-exp (vars vals body)
 				(syntax-expand (let-exp vars (map (lambda (x) (parse-exp 499)) vals)
-					(list (let-exp (map (lambda (x) (string->symbol (string-append (symbol->string x) "temp"))) vars) vals
-						(list (begin-exp (append 
+						(list (begin-exp (append
 							(map (lambda (x y) (set!-exp x y)) vars vals)
-							(list (let-exp (list) (list) body)))))))))]
+							body)))))]
 			
 			[begin-exp (bodies)
 				(app-exp (list (syntax-expand (lambda-exp '() bodies))))]
@@ -506,7 +505,7 @@
 ; evaluate the list of operands, putting results into a list
 
 (define set!-var-to-val-in-env
-	(lambda (var val penv)
+	(lambda (var val penv oenv)
 		(cases environment penv
 			[empty-env-record ()
 				(cases environment global-env
@@ -515,12 +514,12 @@
 						(begin
 							(set! syms (cons var syms))
 							(set! vals (cons val vals))
-							(set! global-env (extend-env syms vals (empty-env-record))))])]
+							(set! global-env (extend-env syms vals (empty-env-record)))
+							(display "eyyyyyy"))])]
 			[extended-env-record (syms vals env)
 					(if (find-var-and-set!-it var val syms vals syms vals penv)
 						(void)
-						(set!-var-to-val-in-env var val env))])))
-			
+						(set!-var-to-val-in-env var val env oenv))])))
 			
 (define find-var-and-set!-it
 	(lambda (var val syms vals osyms ovals env)
@@ -532,7 +531,6 @@
 					(set! ovals (cons val vals))
 					(set! env (extend-env osyms ovals env)))
 					(find-var-and-set!-it var val (cdr syms) (cdr vals) osyms ovals env)))))
-		
 
 (define eval-rands
 	(lambda (rands env)
