@@ -1,7 +1,7 @@
 ;:  Single-file version of the interpreter.
 ;; Easier to submit to server, probably harder to use in the development process
 
-(load "C:/304project/chez-init.ss")
+(load "chez-init.ss")
 
 ;-------------------+
 ;                   |
@@ -291,7 +291,7 @@
 
 (define extend-env
 	(lambda (syms vals env)
-		(extended-env-record syms vals env)))
+		(extended-env-record syms (map cell vals) env)))
 
 (define list-find-position
 	(lambda (sym los)
@@ -307,24 +307,32 @@
 					(if (number? list-index-r)
 						(+ 1 list-index-r)
 						#f))])))
+                        
+(define cell box)
+        
+(define cell? box?)
+
+(define cell-ref unbox)
+
+(define cell-set! set-box!)
+
+(define deref cell-ref)
+
+(define set-ref! cell-set!)
 
 (define apply-env
 	(lambda (env sym succeed fail)
-		(cases environment env
-			[empty-env-record ()
-				(fail)]
-			[extended-env-record (syms vals env)
-				(let ([pos (list-find-position sym syms)])
-					(if (number? pos)
-						(succeed (list-ref vals pos))
-						(apply-env env sym succeed fail)))])))
-
-
-
-
-
-
-
+		(deref (apply-env-ref env sym succeed fail))))
+                        
+(define apply-env-ref
+    (lambda (env sym succeed fail)
+        (cases environment env
+            [empty-env-record () (fail)]
+            [extended-env-record (syms vals env)
+                (let ([pos (list-find-position sym syms)])
+                    (if (number? pos)
+                        (succeed (list-ref vals pos))
+                        (apply-env env sym succeed fail)))])))
 
 ;-----------------------+
 ;                       |
@@ -383,7 +391,7 @@
 			[let*-exp (vars vals body)
 				(syntax-expand (let*-builder vars vals body))]
 			[letrec-exp (vars vals body)
-				(syntax-expand (let-exp vars (map (lambda (x) (parse-exp 499)) vals)
+				(syntax-expand (let-exp vars (map (lambda (x) (parse-exp (gensym))) vals)
 						(list (begin-exp (append
 							(map (lambda (x y) (set!-exp x y)) vars vals)
 							body)))))]
@@ -435,10 +443,9 @@
             (void))))
 
 
-
 ;-------------------+
 ;                   |
-;   INTERPRETER    |
+;   INTERPRETER     |
 ;                   |
 ;-------------------+
 
@@ -499,38 +506,19 @@
 				[while-exp (condition bodies)
 					(while-proc condition bodies env)]
 				[set!-exp (var val)
-					(set!-var-to-val-in-env var val env)]
+					(set-ref! 
+                        (apply-env-ref env var 						
+                            identity-proc
+                            (lambda ()
+                                (apply-env global-env
+                                    var
+                                    identity-proc
+                                    (lambda ()
+                                        (error 'apply-env "variable ~s is not bound" var)))))
+                        (eval-exp val env))]
 				[else (eopl:error 'eval-exp "Bad abstract syntax: ~a" exp)]))))
 
 ; evaluate the list of operands, putting results into a list
-
-(define set!-var-to-val-in-env
-	(lambda (var val penv oenv)
-		(cases environment penv
-			[empty-env-record ()
-				(cases environment global-env
-					[empty-env-record () (eopl:error 'set!-var-to-val-in-env "global env is empty D:")]
-					[extended-env-record (syms vals env)
-						(begin
-							(set! syms (cons var syms))
-							(set! vals (cons val vals))
-							(set! global-env (extend-env syms vals (empty-env-record)))
-							(display "eyyyyyy"))])]
-			[extended-env-record (syms vals env)
-					(if (find-var-and-set!-it var val syms vals syms vals penv)
-						(void)
-						(set!-var-to-val-in-env var val env oenv))])))
-			
-(define find-var-and-set!-it
-	(lambda (var val syms vals osyms ovals env)
-		(if (null? syms)
-			#f
-			(if (eqv? (car syms) var)
-				(begin
-					(set! osyms (cons var syms))
-					(set! ovals (cons val vals))
-					(set! env (extend-env osyms ovals env)))
-					(find-var-and-set!-it var val (cdr syms) (cdr vals) osyms ovals env)))))
 
 (define eval-rands
 	(lambda (rands env)
