@@ -11,6 +11,10 @@
 
 ; parsed expression
 
+(define ref-or-symbol?
+    (lambda (x)
+        (or (symbol? x) (and (list? x) (eqv? 'ref-exp (car x))))))
+
 (define-datatype expression expression?
 	[var-exp
 		(id symbol?)]
@@ -24,11 +28,11 @@
 		(ids symbol?)
 		(body (list-of expression?))]
 	[lambda-exp-improper
-		(ids (list symbol?))
-		(more-ids symbol?)
+		(ids (list ref-or-symbol?))
+		(more-ids ref-or-symbol?)
 		(body (list-of expression?))]
 	[lambda-exp
-		(ids list?)
+		(ids (list-of ref-or-symbol?))
 		(body (list-of expression?))]
 	[let-exp
 		(vars list?)
@@ -97,7 +101,7 @@
 (define-datatype environment environment?
 	(empty-env-record)
 	(extended-env-record
-		(syms (list-of symbol?))
+		(syms (list-of ref-or-symbol?))
 		(vals (list-of scheme-value?))
 		(env environment?)))
 
@@ -105,7 +109,7 @@
 	[prim-proc
 		(name symbol?)]
 	[closure
-		(ids (list-of symbol?))
+		(ids (list-of ref-or-symbol?))
 		(body (list-of expression?))
 		(env environment?)]
 	[closure-varargs
@@ -158,9 +162,7 @@
 							[else (cond
 									[(symbol? (2nd datum)) (lambda-exp-vararg (2nd datum) (in-order-map parse-exp (cddr datum)))]
 									[(list? (2nd datum))
-										(if (andmap symbol? (2nd datum))
-											(lambda-exp (2nd datum) (in-order-map parse-exp (cddr datum)))
-											(lambda-exp (map parse-exp (2nd datum)) (map parse-exp (cddr datum))))]
+										(lambda-exp (map (lambda (x) (if (symbol? x) x (parse-exp x))) (2nd datum)) (map parse-exp (cddr datum)))]
 									[else (lambda-exp-improper (get-proper-part (2nd datum)) (get-improper-part (2nd datum)) (in-order-map parse-exp (cddr datum)))])])]
 					[(eqv? (car datum) 'let)
 						(cond
