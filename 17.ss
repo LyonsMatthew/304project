@@ -76,7 +76,10 @@
 		(condition expression?)
 		(bodies (list-of expression?))]
 	[app-exp
-		(body (list-of expression?))])
+		(body (list-of expression?))]
+    [define-exp
+        (name symbol?)
+        (val expression?)])
 
 
 
@@ -219,6 +222,8 @@
 							(cddr datum)))]
 					[(eqv? (car datum) 'while)
 						(while-exp (parse-exp (cadr datum)) (map parse-exp (cddr datum)))]
+                    [(eqv? (car datum) 'define)
+                        (define-exp (2nd datum) (parse-exp (3rd datum)))]
 					[(eqv? (car datum) 'quote)
 						(if (null? (cadr datum))
 							(lit-exp '())
@@ -266,7 +271,8 @@
 				conditions
 				bodies))]
 			[while-exp (condition bodies) (append (list 'while (unparse-exp condition)) (map unparse-exp bodies))]
-			[quote-exp (body) (unparse-exp body)]
+            [define-exp (name val) (append (list 'define name (unparse-exp val)))]
+			[quote-exp (body) `(quote ,(unparse-exp body))]
 			[app-exp (body) (map unparse-exp body)])))
 
 (define build-improper-lambda
@@ -470,6 +476,10 @@
 
 (define global-env init-env)
 
+(define reset-global-env
+    (lambda ()
+        (set! global-env init-env)))
+
 ; top-level-eval evaluates a form in the global environment
 (define top-level-eval
 	(lambda (form)
@@ -527,6 +537,11 @@
                                     (lambda ()
                                         (error 'apply-env-ref "variable ~s is not bound" var)))))
                         (eval-exp val env))]
+                [define-exp (name val)
+                    (set! global-env (extend-env 
+                        (list name)
+                        (eval-rands val env)
+                        global-env))]
 				[else (eopl:error 'eval-exp "Bad abstract syntax: ~a" exp)]))))
 
 ; evaluate the list of operands, putting results into a list
