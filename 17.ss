@@ -233,8 +233,12 @@
 							(if (list? (car datum))
 								(if (eqv? (caar datum) 'lambda)
 									(app-exp (list (parse-exp (car datum))))
-									(tiny-list-exp (parse-exp (1st datum))))
-								(tiny-list-exp (parse-exp (1st datum))))
+                                    (if (symbol? (caar datum))
+                                        (app-exp (list (parse-exp (caar datum))))
+                                        (tiny-list-exp (parse-exp (1st datum)))))
+                                (if (symbol? (car datum))
+                                    (app-exp (list (parse-exp (car datum))))
+                                    (tiny-list-exp (parse-exp (1st datum)))))
 							(app-exp (in-order-map parse-exp datum)))])]
 			[(lambda (x) (ormap (lambda (pred) (pred x)) (list number? vector? boolean? symbol? string? pair? null?))) (lit-exp datum)]
 			[(vector? datum) (vector-exp datum)]
@@ -251,29 +255,29 @@
 			[lambda-exp (id body) (append (list 'lambda id) (in-order-map unparse-exp body))]
 			[let-exp (vars vals body) (append (list 'let (in-order-map list vars (in-order-map unparse-exp vals))) (in-order-map unparse-exp body))]
 			[named-let-exp (name vars vals body) (append (list 'let name (in-order-map list vars (in-order-map unparse-exp vals))) (in-order-map unparse-exp body))]
-			[let*-exp (vars vals body) (append (list 'let* (map list vars (map unparse-exp vals))) (map unparse-exp body))]
-			[letrec-exp (vars vals body) (append (list 'letrec (map list vars (map unparse-exp vals))) (map unparse-exp body))]
+			[let*-exp (vars vals body) (append (list 'let* (in-order-map list vars (in-order-map unparse-exp vals))) (in-order-map unparse-exp body))]
+			[letrec-exp (vars vals body) (append (list 'letrec (in-order-map list vars (in-order-map unparse-exp vals))) (in-order-map unparse-exp body))]
 			[vector-exp (id) id]
 			[set!-exp (var val) (list 'set! var (unparse-exp val))]
 			[if-exp (condition body-true body-false) (list 'if (unparse-exp condition) (unparse-exp body-true) (unparse-exp body-false))]
 			[if-pirate-exp (condition body-true) (list 'if (unparse-exp condition) (unparse-exp body-true))]
-			[cond-exp (conditions bodies) (append (list 'cond) (map (lambda (x y)
+			[cond-exp (conditions bodies) (append (list 'cond) (in-order-map (lambda (x y)
 				(if (boolean? (unparse-exp x))
 					(list 'else (unparse-exp y))
 					(list (unparse-exp x) (unparse-exp y))))
 				conditions bodies))]
-			[begin-exp (bodies) (append (list 'begin) (map unparse-exp bodies))]
-			[and-exp (bodies) (append (list 'and) (map unparse-exp bodies))]
-			[or-exp (bodies) (append (list 'or) (map unparse-exp bodies))]
+			[begin-exp (bodies) (append (list 'begin) (in-order-map unparse-exp bodies))]
+			[and-exp (bodies) (append (list 'and) (in-order-map unparse-exp bodies))]
+			[or-exp (bodies) (append (list 'or) (in-order-map unparse-exp bodies))]
 			[case-exp (val conditions bodies) (append (list 'case (unparse-exp val))
-				(map (lambda (x y)
+				(in-order-map (lambda (x y)
 					(list (unparse-exp x) (unparse-exp y)))
 				conditions
 				bodies))]
-			[while-exp (condition bodies) (append (list 'while (unparse-exp condition)) (map unparse-exp bodies))]
+			[while-exp (condition bodies) (append (list 'while (unparse-exp condition)) (in-order-map unparse-exp bodies))]
             [define-exp (name val) (append (list 'define name (unparse-exp val)))]
 			[quote-exp (body) `(quote ,(unparse-exp body))]
-			[app-exp (body) (map unparse-exp body)])))
+			[app-exp (body) (in-order-map unparse-exp body)])))
 
 (define build-improper-lambda
 	(lambda (ids more-ids)
@@ -398,18 +402,18 @@
 	(lambda (exp)
 		(cases expression exp
 			[cond-exp (conditions bodies)
-				(let cond-to-if ([conditions (map syntax-expand conditions)] [bodies (map syntax-expand bodies)])
+				(let cond-to-if ([conditions (in-order-map syntax-expand conditions)] [bodies (in-order-map syntax-expand bodies)])
 					(if (null? (cdr conditions))
 						(if-pirate-exp (car conditions) (car bodies))
 						(if-exp (car conditions) (car bodies) (cond-to-if (cdr conditions) (cdr bodies)))))]
 			[let-exp (vars vals body)
-				(app-exp (append (list (lambda-exp vars (map syntax-expand body))) (map syntax-expand vals)))]
+				(app-exp (append (list (lambda-exp vars (in-order-map syntax-expand body))) (in-order-map syntax-expand vals)))]
 			[named-let-exp (name vars vals body)
 				(syntax-expand (app-exp (append (list (letrec-exp (list name) (list (lambda-exp vars body)) (list (var-exp name)))) vals)))]
 			[let*-exp (vars vals body)
 				(syntax-expand (let*-builder vars vals body))]
 			[letrec-exp (vars vals body)
-				(syntax-expand (let-exp vars (map (lambda (x) (parse-exp 0)) vals)
+				(syntax-expand (let-exp vars (in-order-map (lambda (x) (parse-exp 0)) vals)
 						(list (begin-exp (append
 							(map (lambda (x y) (set!-exp x y)) vars vals)
 							body)))))]
@@ -432,8 +436,8 @@
                             (syntax-expand (let-exp (list 'result) (list (car conditions))
                                 (list (if-exp (parse-exp 'result) (parse-exp 'result) (or-to-if (cdr conditions)))))))))]
 			[set!-exp (var val) (set!-exp var (syntax-expand val))]
-			[app-exp (bodies) (app-exp (map syntax-expand bodies))]
-			[lambda-exp (ids body) (lambda-exp ids (map syntax-expand body))]
+			[app-exp (bodies) (app-exp (in-order-map syntax-expand bodies))]
+			[lambda-exp (ids body) (lambda-exp ids (in-order-map syntax-expand body))]
 			[if-exp (condition body-true body-false) (if-exp (syntax-expand condition) (syntax-expand body-true) (syntax-expand body-false))]
 			[if-pirate-exp (condition body-true) (if-pirate-exp (syntax-expand condition) (syntax-expand body-true))]
 			[case-exp (val conditions bodies)
