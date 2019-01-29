@@ -24,7 +24,7 @@
 		(ids symbol?)
 		(body (list-of expression?))]
 	[lambda-exp-improper
-		(ids (list-of symbol?))
+		(ids (list symbol?))
 		(more-ids symbol?)
 		(body (list-of expression?))]
 	[lambda-exp
@@ -77,6 +77,8 @@
 		(bodies (list-of expression?))]
 	[app-exp
 		(body (list-of expression?))]
+	[ref-exp
+		(var symbol?)]
     [define-exp
         (name symbol?)
         (val expression?)])
@@ -155,9 +157,10 @@
 							[(null? (cddr datum)) (eopl:error 'parse-exp "lambda-expression: incorrect length ~s" datum)]
 							[else (cond
 									[(symbol? (2nd datum)) (lambda-exp-vararg (2nd datum) (in-order-map parse-exp (cddr datum)))]
-									[(list? (2nd datum)) (if (not (andmap symbol? (2nd datum)))
-										(eopl:error 'parse-exp "lambda's formal arguments ~s must all be symbols" datum)
-										(lambda-exp (2nd datum) (in-order-map parse-exp (cddr datum))))]
+									[(list? (2nd datum))
+										(if (andmap symbol? (2nd datum))
+											(lambda-exp (2nd datum) (in-order-map parse-exp (cddr datum)))
+											(lambda-exp (map parse-exp (2nd datum)) (map parse-exp (cddr datum))))]
 									[else (lambda-exp-improper (get-proper-part (2nd datum)) (get-improper-part (2nd datum)) (in-order-map parse-exp (cddr datum)))])])]
 					[(eqv? (car datum) 'let)
 						(cond
@@ -224,6 +227,8 @@
 						(while-exp (parse-exp (cadr datum)) (in-order-map parse-exp (cddr datum)))]
                     [(eqv? (car datum) 'define)
                         (define-exp (2nd datum) (parse-exp (3rd datum)))]
+					[(eqv? (car datum) 'ref)
+						(ref-exp (2nd datum))]
 					[(eqv? (car datum) 'quote)
 						(if (null? (cadr datum))
 							(lit-exp '())
@@ -276,6 +281,7 @@
 				bodies))]
 			[while-exp (condition bodies) (append (list 'while (unparse-exp condition)) (in-order-map unparse-exp bodies))]
             [define-exp (name val) (append (list 'define name (unparse-exp val)))]
+			[ref-exp (var) (list 'ref var)]
 			[quote-exp (body) `(quote ,(unparse-exp body))]
 			[app-exp (body) (in-order-map unparse-exp body)])))
 
