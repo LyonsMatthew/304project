@@ -319,7 +319,29 @@
 
 (define extend-env
 	(lambda (syms vals env)
-		(extended-env-record syms (in-order-map cell vals) env)))
+		(extended-env-record
+			(in-order-map (lambda (x) (if (symbol? x) x (cases expression x [ref-exp (var) var] [else x]))) syms)
+			(in-order-map
+				(lambda (y)
+					(let ([x (list-ref syms (list-find-position y vals))])
+						(if (symbol? x)
+							(cell y)
+							(cell (cell y)))))
+				vals)
+			env)))
+			
+(define add-vars-but-not-refs
+	(lambda (syms vals)
+		(if (null? syms)
+			(values syms vals)
+			(if (symbol? (car syms))
+				(call-with-values 
+					(lambda () (add-vars-but-not-refs (cdr syms) (cdr vals)))
+					(lambda (result-syms result-vals) (values (cons (car syms) result-syms) (cons (car vals) result-vals))))
+				(call-with-values 
+					(lambda () (add-vars-but-not-refs (cdr syms) (cdr vals)))
+					(lambda (result-syms result-vals) (values result-syms result-vals)))))))
+			
 
 (define list-find-position
 	(lambda (sym los)
