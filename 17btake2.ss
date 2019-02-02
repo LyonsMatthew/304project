@@ -28,11 +28,11 @@
 		(ids symbol?)
 		(body (list-of expression?))]
 	[lambda-exp-improper
-		(ids (list ref-or-symbol?))
-		(more-ids ref-or-symbol?)
+		(ids (list-of symbol?))
+		(more-ids symbol?)
 		(body (list-of expression?))]
 	[lambda-exp
-		(ids (list-of ref-or-symbol?))
+		(ids list?)
 		(body (list-of expression?))]
 	[let-exp
 		(vars list?)
@@ -101,7 +101,7 @@
 (define-datatype environment environment?
 	(empty-env-record)
 	(extended-env-record
-		(syms (list-of ref-or-symbol?))
+		(syms (list-of symbol?))
 		(vals (list-of scheme-value?))
 		(env environment?)))
 
@@ -317,19 +317,6 @@
 	(lambda ()
 		(empty-env-record)))
 
-; (define extend-env
-	; (lambda (syms vals env)
-		; (extended-env-record 
-			; (in-order-map (lambda (x) (if (symbol? x) x (cases expression x [ref-exp (var) var] [else x]))) syms)
-			; (in-order-map
-				; (lambda (y)
-					; (let ([x (list-ref syms (list-find-position y vals))])
-						; (if (symbol? x)
-							; (cell y)
-							; (cell (cell y)))))
-				; vals)
-			; env)))
-			
 (define extend-env
 	(lambda (syms vals env)
 		(extended-env-record syms vals env)))
@@ -363,7 +350,7 @@
 
 (define apply-env
 	(lambda (env sym succeed fail)
-		(cell-ref (apply-env-ref env sym succeed fail))))
+		(deref (apply-env-ref env sym succeed fail))))
 
 (define apply-env-ref
     (lambda (env sym succeed fail)
@@ -485,6 +472,28 @@
                 (while-proc condition bodies env)
                 (void))
             (void))))
+			
+(define easy-apply-env-ref
+	(lambda (env sym)
+		(let ([identity-proc (lambda (x) x)])
+		(apply-env-ref env sym identity-proc
+						(lambda ()
+							(apply-env-ref global-env
+								sym
+								identity-proc
+								(lambda ()
+									(error 'apply-env "variable ~s is not bound" sym))))))))
+									
+(define easy-apply-env
+	(lambda (env sym)
+		(let ([identity-proc (lambda (x) x)])
+		(apply-env env sym identity-proc
+						(lambda ()
+							(apply-env-ref global-env
+								sym
+								identity-proc
+								(lambda ()
+									(error 'apply-env "variable ~s is not bound" sym))))))))
 
 
 ;-------------------+
@@ -552,21 +561,19 @@
 					(while-proc condition bodies env)]
 				[set!-exp (var val)
 					(set-ref!
-                        (deref (apply-env-ref env var
+                        (apply-env-ref env var
                             identity-proc
                             (lambda ()
                                 (apply-env-ref global-env
                                     var
                                     identity-proc
                                     (lambda ()
-                                        (error 'apply-env-ref "variable ~s is not bound" var))))))
-                        (eval-exp val env))
-					(display env)
-					(newline)]
+                                        (error 'apply-env-ref "variable ~s is not bound" var)))))
+                        (eval-exp val env))]
                 [define-exp (name val)
                     (set! global-env (extend-env 
                         (list name)
-                        (eval-rands (list val) env)
+                        (map cell (eval-rands (list val) env))
                         global-env))]
 				[else (eopl:error 'eval-exp "Bad abstract syntax: ~a" exp)]))))
 
@@ -591,54 +598,42 @@
 
 (define apply-proc
 	(lambda (proc-value args eenv)
-		(let ([proc-value (if (cell? proc-value) (cell-ref proc-value) proc-value)])
-			(cases proc-val proc-value
-				[prim-proc (op) (apply-prim-proc op (in-order-map (lambda (x) (cell-ref (eval-exp x eenv))) args) eenv)]
-				[closure (ids body env)
-					(eval-body body (call-with-values 
-						(lambda () (add-vars-and-refs ids (expand-arg-if-not-var args eenv) eenv))
-						(lambda (result-syms result-vals) (extend-env result-syms result-vals env))))]
-				[closure-varargs (ids body env)
-					(eval-body body (extend-env (list ids) (list args) env))]
-				[closure-improper (ids more-ids body env)
-					(eval-body body (extend-env (append ids (list more-ids)) (append (get-proper-args (length ids) args) (list (get-improper-args (length ids) args))) env))]
-				[else (eopl:error 'apply-proc "Attempt to apply bad procedure: ~s" proc-value)]))))
-				
-(define expand-arg-if-not-var
-	(lambda (args env)
+		(cases proc-val proc-value
+			[prim-proc (op) (apply-prim-proc op args eenv)]
+			[closure (ids body env)
+				(let ([args (convert-args ids args eenv)])
+					(eval-body body (extend-env (convert-refs-to-syms ids) args env)))]
+			[closure-varargs (ids body env)
+				(eval-body body (extend-env (list ids) (list args) env))]
+			[closure-improper (ids more-ids body env)
+				(eval-body body (extend-env (append ids (list more-ids)) (append (get-proper-args (length ids) args) (list (get-improper-args (length ids) args))) env))]
+			[else (eopl:error 'apply-proc "Attempt to apply bad procedure: ~s" proc-value)])))
+			
+(define convert-args
+	(lambda (syms args env)
 		(if (null? args)
 			'()
-			(if (and (list? (car args)) (equal? 'var-exp (caar args)))
-				(cons (car args) (expand-arg-if-not-var (cdr args) env))
-				(cons (eval-exp (car args) env) (expand-arg-if-not-var (cdr args) env))))))
+			(if (expression? (car args))
+				(cases expression (car args)
+					[var-exp (var) 
+						(if (expression? (car syms))
+							(cases expression (car syms) ; always a ref-exp
+								[ref-exp (varr) (cons (easy-apply-env-ref env var) (convert-args (cdr syms) (cdr args) env))]
+								[else 765456787])
+							(cons (cell (easy-apply-env env var)) (convert-args (cdr syms) (cdr args) env)))]
+					[else (cons (box (eval-exp (car args) env)) (convert-args (cdr syms) (cdr args) env))])
+				(cons (cell (car args)) (convert-args (cdr syms) (cdr args) env))))))
 				
-(define add-vars-and-refs
-	(lambda (syms vals env)
+(define convert-refs-to-syms
+	(lambda (syms)
 		(if (null? syms)
-			(values syms vals)
-			(if (symbol? (car syms))
-				(call-with-values 
-					(lambda () (add-vars-and-refs (cdr syms) (cdr vals) env))
-					(lambda (result-syms result-vals) (values
-						(cons (car syms) result-syms)
-						(cons (get-val-as-value (car vals) env) result-vals))))
-				(call-with-values 
-					(lambda () (add-vars-and-refs (cdr syms) (cdr vals) env))
-					(lambda (result-syms result-vals) (values
-						(cons (cases expression (car syms) [ref-exp (var) var] [else 65432]) result-syms)
-						(cons (get-ref-as-value (car vals) env) result-vals))))))))
-						
-(define get-val-as-value
-	(lambda (val env)
-		(let ([identity-proc (lambda (x) x)])
-			(if (and (list? val) (equal? 'var-exp (car val)))
-				(cell (deref (eval-exp val env)))
-				(cell (cell val))))))
-				
-(define get-ref-as-value
-	(lambda (val env)
-		(let ([identity-proc (lambda (x) x)])
-			(cell (eval-exp val env)))))
+			'()
+			(if (expression? (car syms))
+				(cases expression (car syms)
+					[ref-exp (var) (cons var (convert-refs-to-syms (cdr syms)))]
+					[else 763476543])
+				(cons (car syms) (convert-refs-to-syms (cdr syms)))))))
+			
 
 (define get-proper-args
 	(lambda (num args)
@@ -659,63 +654,64 @@
 	(lambda (proc vals env)
 		(if (null? vals)
 			'()
-			(cons (apply-proc proc (list (car vals)) env) (custom-map proc (cdr vals) env)))))
+			(cons (apply-proc proc (list (car vals)) env) (custom-map proc (cdr vals))))))
 
 (define apply-prim-proc
 	(lambda (prim-proc args env)
-		(case prim-proc
-			[(+) (apply + args)]
-			[(-) (apply - args)]
-			[(*) (apply * args)]
-			[(/) (apply / args)]
-			[(add1) (+ (1st args) 1)]
-			[(sub1) (- (1st args) 1)]
-			[(cons) (cons (1st args) (2nd args))]
-			[(=) (= (1st args) (2nd args))]
-			[(eq?) (eq? (1st args) (2nd args))]
-			[(eqv?) (eqv? (1st args) (2nd args))]
-			[(equal?) (equal? (1st args) (2nd args))]
-			[(length) (length (1st args))]
-			[(list->vector) (list->vector (1st args))]
-			[(vector->list) (vector->list (1st args))]
-			[(>=) (>= (1st args) (2nd args))]
-			[(<=) (<= (1st args) (2nd args))]
-			[(car) (car (1st args))]
-			[(cdr) (cdr (1st args))]
-			[(caar) (caar (1st args))]
-			[(cadr) (cadr (1st args))]
-			[(cadar) (cadar (1st args))]
-			[(caddr) (caddr (1st args))]
-			[(list) (apply list args)]
-			[(null?) (null? (1st args))]
-			[(list?) (list? (1st args))]
-			[(pair?) (list? (1st args))]
-			[(vector?) (vector? (1st args))]
-			[(number?) (number? (1st args))]
-			[(symbol?) (symbol? (1st args))]
-			[(procedure?) (proc-val? (1st args))]
-			[(zero?) (zero? (1st args))]
-			[(not) (not (1st args))]
-			[(set-car!) (set-car! (1st args) (2nd args))]
-			[(set-cdr!) (set-cdr! (1st args) (2nd args))]
-			[(map) (custom-map (1st args) (2nd args) env)]
-			[(apply) (apply apply-proc (1st args) (cdr args))]
-			[(list-ref) (list-ref (1st args) (2nd args))]
-			[(vector-ref) (vector-ref (1st args) (2nd args))]
-			[(vector) (apply vector args)]
-			[(<) (< (1st args) (2nd args))]
-			[(>) (> (1st args) (2nd args))]
-			[(vector-set!) (vector-set! (1st args) (2nd args) (3rd args))]
-			[(quotient) (quotient (1st args) (2nd args))]
-			[(display) (display (1st args))]
-			[(newline) (newline)]
-			[(symbol->string) (symbol->string (1st args))]
-			[(string->symbol) (string->symbol (1st args))]
-			[(string-append) (apply string-append args)]
-			[(append) (apply append args)]
-			[(list-tail) (list-tail (1st args) (2nd args))]
-            [(assq) (assq (1st args) (2nd args))]
-			[else (error 'apply-prim-proc "Bad primitive procedure name: ~s" prim-proc)])))
+		(let* ([args (eval-rands args env)])
+			(case prim-proc
+				[(+) (apply + args)]
+				[(-) (apply - args)]
+				[(*) (apply * args)]
+				[(/) (apply / args)]
+				[(add1) (+ (1st args) 1)]
+				[(sub1) (- (1st args) 1)]
+				[(cons) (cons (1st args) (2nd args))]
+				[(=) (= (1st args) (2nd args))]
+				[(eq?) (eq? (1st args) (2nd args))]
+				[(eqv?) (eqv? (1st args) (2nd args))]
+				[(equal?) (equal? (1st args) (2nd args))]
+				[(length) (length (1st args))]
+				[(list->vector) (list->vector (1st args))]
+				[(vector->list) (vector->list (1st args))]
+				[(>=) (>= (1st args) (2nd args))]
+				[(<=) (<= (1st args) (2nd args))]
+				[(car) (car (1st args))]
+				[(cdr) (cdr (1st args))]
+				[(caar) (caar (1st args))]
+				[(cadr) (cadr (1st args))]
+				[(cadar) (cadar (1st args))]
+				[(caddr) (caddr (1st args))]
+				[(list) (apply list args)]
+				[(null?) (null? (1st args))]
+				[(list?) (list? (1st args))]
+				[(pair?) (list? (1st args))]
+				[(vector?) (vector? (1st args))]
+				[(number?) (number? (1st args))]
+				[(symbol?) (symbol? (1st args))]
+				[(procedure?) (proc-val? (1st args))]
+				[(zero?) (zero? (1st args))]
+				[(not) (not (1st args))]
+				[(set-car!) (set-car! (1st args) (2nd args))]
+				[(set-cdr!) (set-cdr! (1st args) (2nd args))]
+				[(map) (custom-map (1st args) (2nd args))]
+				[(apply) (apply (lambda (x y) (apply-proc x y env)) (1st args) (cdr args))]
+				[(list-ref) (list-ref (1st args) (2nd args))]
+				[(vector-ref) (vector-ref (1st args) (2nd args))]
+				[(vector) (apply vector args)]
+				[(<) (< (1st args) (2nd args))]
+				[(>) (> (1st args) (2nd args))]
+				[(vector-set!) (vector-set! (1st args) (2nd args) (3rd args))]
+				[(quotient) (quotient (1st args) (2nd args))]
+				[(display) (display (1st args))]
+				[(newline) (newline)]
+				[(symbol->string) (symbol->string (1st args))]
+				[(string->symbol) (string->symbol (1st args))]
+				[(string-append) (apply string-append args)]
+				[(append) (apply append args)]
+				[(list-tail) (list-tail (1st args) (2nd args))]
+				[(assq) (assq (1st args) (2nd args))]
+				[else (error 'apply-prim-proc "Bad primitive procedure name: ~s" prim-proc)]))))
 
 (define rep      ; "read-eval-print" loop.
 	(lambda ()
