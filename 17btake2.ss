@@ -24,14 +24,26 @@
 					(list ': 'free exp))]
 			[else (if (list? exp)
 				(cond
+					[(null? exp) '()]
 					[(eqv? (car exp) 'lambda)
 						(append (list 'lambda (cadr exp)) (lexical-address-helper (cddr exp) (bound-maker (cadr exp) bound)))]
 					[(eqv? (car exp) 'if)
 						(cons 'if (lexical-address-helper (cdr exp) bound))]
 					[(eqv? (car exp) 'let)
-						(cons 'let (cons (map (lambda (x) (list (car x) (lexical-address-helper (cadr x) bound))) (cadr exp)) (lexical-address-helper (cddr exp) (bound-maker (map (lambda (x) (car x)) (cadr exp)) bound))))]
+						(if (symbol? (cadr exp))
+							(append (list 'let (cadr exp)) (cons (map (lambda (x) (list (car x) (lexical-address-helper (cadr x) (bound-maker '() (bound-maker (map (lambda (x) (car x)) (caddr exp)) bound))))) (caddr exp)) (lexical-address-helper (cdddr exp) (bound-maker '() (bound-maker (map (lambda (x) (car x)) (caddr exp)) bound)))))
+							(cons 'let (cons (map (lambda (x) (list (car x) (lexical-address-helper (cadr x) bound))) (cadr exp)) (lexical-address-helper (cddr exp) (bound-maker (map (lambda (x) (car x)) (cadr exp)) bound)))))]
+					[(eqv? (car exp) 'let*)
+							(cons 'let* (cons (map (lambda (x) (list (car x) (lexical-address-helper (cadr x) bound))) (cadr exp)) (lexical-address-helper (cddr exp) (bound-maker (map (lambda (x) (car x)) (cadr exp)) bound))))]
 					[(eqv? (car exp) 'set!)
 						(append (list 'set! (cadr exp)) (lexical-address-helper (cddr exp) bound))]
+					[(eqv? (car exp) 'begin)
+						(append (list 'begin) (lexical-address-helper (cdr exp) (bound-maker '() bound)))]
+					[(eqv? (car exp) 'define)
+						(append (list 'define) (lexical-address-helper (cdr exp) bound))]
+					[(eqv? (car exp) 'letrec)
+						(cons 'letrec (cons (map (lambda (x) (list (car x) (lexical-address-helper (cadr x) (bound-maker '() (bound-maker (map (lambda (x) (car x)) (cadr exp)) bound))))) (cadr exp)) (lexical-address-helper (cddr exp) (bound-maker '() (bound-maker (map (lambda (x) (car x)) (cadr exp)) bound)))))]
+					[(eqv? (car exp) 'quote) exp]
 					[else (map (lambda (x) (lexical-address-helper x bound)) exp)])
 				exp)])))
 				
@@ -43,7 +55,9 @@
 	(lambda (ls n)
 		(if (null? ls)
 			'()
-			(cons (list (car ls) 0 n) (bound-maker-helper (cdr ls) (+ n 1))))))
+			(cons 
+				(if (list? (car ls)) (list (cadar ls) 0 n) (list (car ls) 0 n))
+				(bound-maker-helper (cdr ls) (+ n 1))))))
 			
 (define get-bound-match
 	(lambda (bound sym)
@@ -58,6 +72,11 @@
 (define-datatype expression expression?
 	[var-exp
 		(id symbol?)]
+	[var-exp-but-it-is-actually-not-a-var-exp-and-also-it-is-bound
+		(depth number?)
+		(position number?)]
+	[var-exp-but-it-is-actually-not-a-var-exp-and-also-it-is-free
+		(var symbol?)]
 	[tiny-list-exp
 		(body expression?)]
 	[quote-exp
@@ -268,9 +287,13 @@
 					[(eqv? (car datum) 'while)
 						(while-exp (parse-exp (cadr datum)) (in-order-map parse-exp (cddr datum)))]
                     [(eqv? (car datum) 'define)
-                        (define-exp (2nd datum) (parse-exp (3rd datum)))]
+                        (define-exp (caddr (2nd datum)) (parse-exp (3rd datum)))]
 					[(eqv? (car datum) 'ref)
 						(ref-exp (2nd datum))]
+					[(eqv? (car datum) ':)
+						(if (eqv? (cadr datum) 'free)
+							(var-exp-but-it-is-actually-not-a-var-exp-and-also-it-is-free (caddr datum))
+							(var-exp-but-it-is-actually-not-a-var-exp-and-also-it-is-bound (cadr datum) (caddr datum)))]
 					[(eqv? (car datum) 'quote)
 						(if (null? (cadr datum))
 							(lit-exp '())
@@ -563,12 +586,44 @@
 
 ; eval-exp is the main component of the interpreter
 
+(define lookup-free-by-lexical-address
+	(let ([identity-proc (lambda (x) x)])
+		(lambda (env var)
+			(apply-env global-env 
+				var 
+				identity-proc
+				(lambda ()
+					(apply-env-ref global-env
+						var
+						identity-proc
+						(lambda ()
+							(error 'apply-env "variable ~s is not bound" var))))))))
+							
+(define lookup-bound-by-lexical-address
+	(lambda (old-env depth position)
+		(cases environment old-env
+			[extended-env-record (syms vals env) 
+				(if (eqv? depth 0)
+					(lookup-bound-by-lexical-position vals position)
+					(lookup-bound-by-lexical-address env (- depth 1) position))]
+			[else 876543456787654])))
+				
+(define lookup-bound-by-lexical-position
+	(lambda (vals position)
+		(if (eqv? position 0)
+			(deref (car vals))
+			(lookup-bound-by-lexical-position (cdr vals) (- position 1)))))
+
 (define eval-exp
 	(let ([identity-proc (lambda (x) x)])
 		(lambda (exp env)
 			(cases expression exp
 				[lit-exp (datum) datum]
 				[quote-exp (body) (eval-exp body env)]
+				[var-exp-but-it-is-actually-not-a-var-exp-and-also-it-is-bound (depth position)
+					(lookup-bound-by-lexical-address env depth position)]
+				[var-exp-but-it-is-actually-not-a-var-exp-and-also-it-is-free (var)
+					(lookup-free-by-lexical-address global-env var)]
 				[var-exp (id)
 					(apply-env env
 						id
