@@ -11,6 +11,46 @@
 
 ; parsed expression
 
+(define lexical-address ;help ;;
+	(lambda (exp)
+		(lexical-address-helper exp '())))
+
+(define lexical-address-helper
+	(lambda (exp bound)
+		(cond
+			[(symbol? exp) 
+				(if (ormap (lambda (x) (eqv? exp (car x))) bound)
+					(get-bound-match (reverse bound) exp)
+					(list ': 'free exp))]
+			[else (if (list? exp)
+				(cond
+					[(eqv? (car exp) 'lambda)
+						(append (list 'lambda (cadr exp)) (lexical-address-helper (cddr exp) (bound-maker (cadr exp) bound)))]
+					[(eqv? (car exp) 'if)
+						(cons 'if (lexical-address-helper (cdr exp) bound))]
+					[(eqv? (car exp) 'let)
+						(cons 'let (cons (map (lambda (x) (list (car x) (lexical-address-helper (cadr x) bound))) (cadr exp)) (lexical-address-helper (cddr exp) (bound-maker (map (lambda (x) (car x)) (cadr exp)) bound))))]
+					[(eqv? (car exp) 'set!)
+						(append (list 'set! (cadr exp)) (lexical-address-helper (cddr exp) bound))]
+					[else (map (lambda (x) (lexical-address-helper x bound)) exp)])
+				exp)])))
+				
+(define bound-maker
+	(lambda (ls bound)
+		(append (map (lambda (x) (list (car x) (+ 1 (cadr x)) (caddr x))) bound) (bound-maker-helper ls 0))))
+		
+(define bound-maker-helper
+	(lambda (ls n)
+		(if (null? ls)
+			'()
+			(cons (list (car ls) 0 n) (bound-maker-helper (cdr ls) (+ n 1))))))
+			
+(define get-bound-match
+	(lambda (bound sym)
+		(if (eqv? (caar bound) sym)
+			(list ': (cadar bound) (caddar bound))
+			(get-bound-match (cdr bound) sym))))
+
 (define ref-or-symbol?
     (lambda (x)
         (or (symbol? x) (and (list? x) (eqv? 'ref-exp (car x))))))
@@ -723,7 +763,7 @@
 
 (define eval-one-exp
 	(lambda (x)
-		(top-level-eval (syntax-expand (parse-exp x)))))
+		(top-level-eval (syntax-expand (parse-exp (lexical-address x))))))
 
 
 
