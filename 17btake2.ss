@@ -11,59 +11,85 @@
 
 ; parsed expression
 
-(define lexical-address ;help ;;
-	(lambda (exp)
-		(lexical-address-helper exp '())))
+(define find-position
+	(lambda (value ls)
+		(cond
+			[(null? ls) 0]
+			[(equal? value (car ls)) 0]
+			[(and (list? (car ls)) (equal? value (cadar ls))) 0]
+			[else (+ (find-position value (cdr ls)) 1)])))
+			
+(define member-ref
+	(lambda (value ls)
+		(member value (map (lambda (x) (if (list? x) (cadr x) x)) ls))))
+
+(define find-lexical-coord
+	(lambda (value ls)
+		(cond
+			[(null? ls) #f]
+			[(member value (car ls)) (list 0 (find-position value (car ls)))]
+			[(member-ref value (car ls)) (list 0 (find-position value (car ls)))]
+			[else (let ((result (find-lexical-coord value (cdr ls))))
+				(if (not result)
+					#f
+					(list (+ (car result) 1) (cadr result))))])))
+
+(define is-refed-lexically
+	(lambda (value bound)
+		(not (member value (car bound)))))
+
+(define convert-ref-to-var
+	(lambda (lst)
+		(if (null? lst)
+			'()
+			(if (list? (car lst))
+				(cons (cadar lst) (convert-ref-to-var (cdr lst)))
+				(cons (car lst) (convert-ref-to-var (cdr lst)))))))
+
+(define lexical-address
+	(lambda (lexp)
+		(lexical-address-helper lexp '())))
 
 (define lexical-address-helper
-	(lambda (exp bound)
-		(cond
-			[(symbol? exp) 
-				(if (ormap (lambda (x) (eqv? exp (car x))) bound)
-					(get-bound-match (reverse bound) exp)
-					(list ': 'free exp))]
-			[else (if (list? exp)
-				(cond
-					[(null? exp) '()]
-					[(eqv? (car exp) 'lambda)
-						(append (list 'lambda (cadr exp)) (lexical-address-helper (cddr exp) (bound-maker (cadr exp) bound)))]
-					[(eqv? (car exp) 'if)
-						(cons 'if (lexical-address-helper (cdr exp) bound))]
-					[(eqv? (car exp) 'let)
-						(if (symbol? (cadr exp))
-							(append (list 'let (cadr exp)) (cons (map (lambda (x) (list (car x) (lexical-address-helper (cadr x) (bound-maker '() (bound-maker (map (lambda (x) (car x)) (caddr exp)) bound))))) (caddr exp)) (lexical-address-helper (cdddr exp) (bound-maker '() (bound-maker (map (lambda (x) (car x)) (caddr exp)) bound)))))
-							(cons 'let (cons (map (lambda (x) (list (car x) (lexical-address-helper (cadr x) bound))) (cadr exp)) (lexical-address-helper (cddr exp) (bound-maker (map (lambda (x) (car x)) (cadr exp)) bound)))))]
-					[(eqv? (car exp) 'let*)
-							(cons 'let* (cons (map (lambda (x) (list (car x) (lexical-address-helper (cadr x) bound))) (cadr exp)) (lexical-address-helper (cddr exp) (bound-maker (map (lambda (x) (car x)) (cadr exp)) bound))))]
-					[(eqv? (car exp) 'set!)
-						(append (list 'set! (cadr exp)) (lexical-address-helper (cddr exp) bound))]
-					[(eqv? (car exp) 'begin)
-						(append (list 'begin) (lexical-address-helper (cdr exp) (bound-maker '() bound)))]
-					[(eqv? (car exp) 'define)
-						(append (list 'define) (lexical-address-helper (cdr exp) bound))]
-					[(eqv? (car exp) 'letrec)
-						(cons 'letrec (cons (map (lambda (x) (list (car x) (lexical-address-helper (cadr x) (bound-maker '() (bound-maker (map (lambda (x) (car x)) (cadr exp)) bound))))) (cadr exp)) (lexical-address-helper (cddr exp) (bound-maker '() (bound-maker (map (lambda (x) (car x)) (cadr exp)) bound)))))]
-					[(eqv? (car exp) 'quote) exp]
-					[else (map (lambda (x) (lexical-address-helper x bound)) exp)])
-				exp)])))
-				
-(define bound-maker
-	(lambda (ls bound)
-		(append (map (lambda (x) (list (car x) (+ 1 (cadr x)) (caddr x))) bound) (bound-maker-helper ls 0))))
-		
-(define bound-maker-helper
-	(lambda (ls n)
-		(if (null? ls)
-			'()
-			(cons 
-				(if (list? (car ls)) (list (cadar ls) 0 n) (list (car ls) 0 n))
-				(bound-maker-helper (cdr ls) (+ n 1))))))
-			
-(define get-bound-match
-	(lambda (bound sym)
-		(if (eqv? (caar bound) sym)
-			(list ': (cadar bound) (caddar bound))
-			(get-bound-match (cdr bound) sym))))
+	(lambda (lexp bounded)
+		(if (expression? lexp)
+			(cases expression lexp
+				[var-exp (id)
+					(let ([lexical-coord (find-lexical-coord id bounded)])
+						(if (not lexical-coord)
+							(var-exp-but-it-is-actually-not-a-var-exp-and-also-it-is-free id)
+							(var-exp-but-it-is-actually-not-a-var-exp-and-also-it-is-bound (car lexical-coord) (cadr lexical-coord))))]
+				[lambda-exp (ids body)
+					(let* ([new_bounded (append (list ids) bounded)])
+						(lambda-exp ids (in-order-map
+							(lambda (x) (lexical-address-helper x new_bounded))
+							body)))]
+				[if-exp (condition body-true body-false)
+					(if-exp
+						(lexical-address-helper condition bounded)
+						(lexical-address-helper body-true bounded)
+						(lexical-address-helper body-false bounded))]
+				[if-pirate-exp (condition body-true)
+					(if-pirate-exp
+						(lexical-address-helper condition bounded)
+						(lexical-address-helper body-true bounded))]
+				[app-exp (body)
+					(app-exp
+						(in-order-map
+							(lambda (x) (lexical-address-helper x bounded))
+							body))]
+				[lit-exp (datum)
+					lexp]
+				[quote-exp (body)
+					lexp]
+				[tiny-list-exp (body)
+					(tiny-list-exp (lexical-address-helper body bounded))]
+				[define-exp (name val)
+					(define-exp name (lexical-address-helper val bounded))]
+				[set!-exp (var val)
+					(set!-exp var (lexical-address-helper val bounded))]
+				[else "error"])
+			(in-order-map (lambda (x) (lexical-address-helper x bounded)) lexp))))
 
 (define ref-or-symbol?
     (lambda (x)
@@ -287,7 +313,7 @@
 					[(eqv? (car datum) 'while)
 						(while-exp (parse-exp (cadr datum)) (in-order-map parse-exp (cddr datum)))]
                     [(eqv? (car datum) 'define)
-                        (define-exp (caddr (2nd datum)) (parse-exp (3rd datum)))]
+                        (define-exp (2nd datum) (parse-exp (3rd datum)))]
 					[(eqv? (car datum) 'ref)
 						(ref-exp (2nd datum))]
 					[(eqv? (car datum) ':)
@@ -412,10 +438,52 @@
 (define set-ref! cell-set!)
 
 (define apply-env
-	(lambda (env sym succeed fail)
-		(deref (apply-env-ref env sym succeed fail))))
+	(lambda (env depth position)
+		(deref (apply-env-ref env depth position))))
 
 (define apply-env-ref
+    (lambda (env depth position)
+        (lookup-bound-by-lexical-address env depth position)))
+
+(define easy-apply-env-ref
+	(lambda (env depth position)
+		(let ([identity-proc (lambda (x) x)])
+			(apply-env-ref env depth position))))
+			
+(define easy-apply-env
+	(lambda (env depth position)
+		(apply-env env depth position)))
+									
+(define easy-old-apply-env
+	(lambda (env var)
+		(let ([identity-proc (lambda (x) x)])
+			(old-apply-env env var
+				identity-proc
+					(lambda ()
+						(old-apply-env-ref global-env
+							var
+							identity-proc
+							(lambda ()
+								(error 'apply-env "variable ~s is not bound" var))))))))
+								
+(define easy-old-apply-env-ref
+	(lambda (env var)
+		(let ([identity-proc (lambda (x) x)])
+			(old-apply-env-ref env var
+				identity-proc
+					(lambda ()
+						(old-apply-env-ref global-env
+							var
+							identity-proc
+							(lambda ()
+								(error 'old-apply-env "variable ~s is not bound" var))))))))
+		
+		
+(define old-apply-env
+	(lambda (env sym succeed fail)
+		(deref (old-apply-env-ref env sym succeed fail))))
+
+(define old-apply-env-ref
     (lambda (env sym succeed fail)
         (cases environment env
             [empty-env-record () (fail)]
@@ -423,7 +491,7 @@
                 (let ([pos (list-find-position sym syms)])
                     (if (number? pos)
                         (succeed (list-ref vals pos))
-                        (apply-env-ref env sym succeed fail)))])))
+                        (old-apply-env-ref env sym succeed fail)))])))
 
 ;-----------------------+
 ;                       |
@@ -535,29 +603,6 @@
                 (while-proc condition bodies env)
                 (void))
             (void))))
-			
-(define easy-apply-env-ref
-	(lambda (env sym)
-		(let ([identity-proc (lambda (x) x)])
-		(apply-env-ref env sym identity-proc
-						(lambda ()
-							(apply-env-ref global-env
-								sym
-								identity-proc
-								(lambda ()
-									(error 'apply-env "variable ~s is not bound" sym))))))))
-									
-(define easy-apply-env
-	(lambda (env sym)
-		(let ([identity-proc (lambda (x) x)])
-		(apply-env env sym identity-proc
-						(lambda ()
-							(apply-env-ref global-env
-								sym
-								identity-proc
-								(lambda ()
-									(error 'apply-env "variable ~s is not bound" sym))))))))
-
 
 ;-------------------+
 ;                   |
@@ -586,18 +631,10 @@
 
 ; eval-exp is the main component of the interpreter
 
-(define lookup-free-by-lexical-address
-	(let ([identity-proc (lambda (x) x)])
-		(lambda (env var)
-			(apply-env global-env 
-				var 
-				identity-proc
-				(lambda ()
-					(apply-env-ref global-env
-						var
-						identity-proc
-						(lambda ()
-							(error 'apply-env "variable ~s is not bound" var))))))))
+; (define lookup-free-by-lexical-address
+	; (let ([identity-proc (lambda (x) x)])
+		; (lambda (env var)
+			; (easy-apply-env global-env var))))
 							
 (define lookup-bound-by-lexical-address
 	(lambda (old-env depth position)
@@ -611,7 +648,7 @@
 (define lookup-bound-by-lexical-position
 	(lambda (vals position)
 		(if (eqv? position 0)
-			(deref (car vals))
+			(car vals)
 			(lookup-bound-by-lexical-position (cdr vals) (- position 1)))))
 
 (define eval-exp
@@ -621,19 +658,11 @@
 				[lit-exp (datum) datum]
 				[quote-exp (body) (eval-exp body env)]
 				[var-exp-but-it-is-actually-not-a-var-exp-and-also-it-is-bound (depth position)
-					(lookup-bound-by-lexical-address env depth position)]
+					(easy-apply-env env depth position)]
 				[var-exp-but-it-is-actually-not-a-var-exp-and-also-it-is-free (var)
-					(lookup-free-by-lexical-address global-env var)]
+					(easy-old-apply-env env var)]
 				[var-exp (id)
-					(apply-env env
-						id
-						identity-proc
-						(lambda ()
-							(apply-env-ref global-env
-								id
-								identity-proc
-								(lambda ()
-									(error 'apply-env "variable ~s is not bound" id)))))]
+					(easy-old-apply-env env id)]
 				[tiny-list-exp (body) (eval-exp body env)]
 				[if-exp (condition body-true body-false)
 					(if (eval-exp condition env)
@@ -643,8 +672,11 @@
 					(if (eval-exp condition env)
 						(eval-exp body-true env))]
 				[app-exp (body)
-					(let ([proc-value (eval-exp (car body) env)]
-						[args (cdr body)])
+					(let* ([proc-value (eval-exp (car body) env)]
+						[args 
+							(cases proc-val proc-value
+								[prim-proc (op) (eval-rands (cdr body) env)]
+								[else (cdr body)])])
 						(apply-proc proc-value args env))]
 				[lambda-exp (ids body)
 					(closure ids body env)]
@@ -656,14 +688,7 @@
 					(while-proc condition bodies env)]
 				[set!-exp (var val)
 					(set-ref!
-                        (apply-env-ref env var
-                            identity-proc
-                            (lambda ()
-                                (apply-env-ref global-env
-                                    var
-                                    identity-proc
-                                    (lambda ()
-                                        (error 'apply-env-ref "variable ~s is not bound" var)))))
+                        (easy-old-apply-env-ref env var)
                         (eval-exp val env))]
                 [define-exp (name val)
                     (set! global-env (extend-env 
@@ -676,7 +701,7 @@
 
 (define eval-rands
 	(lambda (rands env)
-		(in-order-map (lambda (e) (eval-exp e env) )
+		(in-order-map (lambda (e) (eval-exp e env))
 			rands)))
 
 (define eval-body
@@ -713,9 +738,21 @@
 					[var-exp (var) 
 						(if (expression? (car syms))
 							(cases expression (car syms) ; always a ref-exp
-								[ref-exp (varr) (cons (easy-apply-env-ref env var) (convert-args (cdr syms) (cdr args) env))]
+								[ref-exp (varr) (cons (easy-old-apply-env-ref env var) (convert-args (cdr syms) (cdr args) env))]
 								[else 765456787])
-							(cons (cell (easy-apply-env env var)) (convert-args (cdr syms) (cdr args) env)))]
+							(cons (cell (easy-old-apply-env env var)) (convert-args (cdr syms) (cdr args) env)))]
+					[var-exp-but-it-is-actually-not-a-var-exp-and-also-it-is-free (var) 
+						(if (expression? (car syms))
+							(cases expression (car syms) ; always a ref-exp
+								[ref-exp (varr) (cons (easy-old-apply-env-ref env var) (convert-args (cdr syms) (cdr args) env))]
+								[else 765456787])
+							(cons (cell (easy-old-apply-env env var)) (convert-args (cdr syms) (cdr args) env)))]
+					[var-exp-but-it-is-actually-not-a-var-exp-and-also-it-is-bound (depth position)
+						(if (expression? (car syms))
+							(cases expression (car syms) ; always a ref-exp
+								[ref-exp (varr) (cons (apply-env-ref env depth position) (convert-args (cdr syms) (cdr args) env))]
+								[else 765456787])
+							(cons (cell (apply-env env depth position)) (convert-args (cdr syms) (cdr args) env)))]
 					[else (cons (box (eval-exp (car args) env)) (convert-args (cdr syms) (cdr args) env))])
 				(cons (cell (car args)) (convert-args (cdr syms) (cdr args) env))))))
 				
@@ -749,64 +786,63 @@
 	(lambda (proc vals env)
 		(if (null? vals)
 			'()
-			(cons (apply-proc proc (list (car vals)) env) (custom-map proc (cdr vals))))))
+			(cons (apply-proc proc (list (car vals)) env) (custom-map proc (cdr vals) env)))))
 
 (define apply-prim-proc
 	(lambda (prim-proc args env)
-		(let* ([args (eval-rands args env)])
-			(case prim-proc
-				[(+) (apply + args)]
-				[(-) (apply - args)]
-				[(*) (apply * args)]
-				[(/) (apply / args)]
-				[(add1) (+ (1st args) 1)]
-				[(sub1) (- (1st args) 1)]
-				[(cons) (cons (1st args) (2nd args))]
-				[(=) (= (1st args) (2nd args))]
-				[(eq?) (eq? (1st args) (2nd args))]
-				[(eqv?) (eqv? (1st args) (2nd args))]
-				[(equal?) (equal? (1st args) (2nd args))]
-				[(length) (length (1st args))]
-				[(list->vector) (list->vector (1st args))]
-				[(vector->list) (vector->list (1st args))]
-				[(>=) (>= (1st args) (2nd args))]
-				[(<=) (<= (1st args) (2nd args))]
-				[(car) (car (1st args))]
-				[(cdr) (cdr (1st args))]
-				[(caar) (caar (1st args))]
-				[(cadr) (cadr (1st args))]
-				[(cadar) (cadar (1st args))]
-				[(caddr) (caddr (1st args))]
-				[(list) (apply list args)]
-				[(null?) (null? (1st args))]
-				[(list?) (list? (1st args))]
-				[(pair?) (list? (1st args))]
-				[(vector?) (vector? (1st args))]
-				[(number?) (number? (1st args))]
-				[(symbol?) (symbol? (1st args))]
-				[(procedure?) (proc-val? (1st args))]
-				[(zero?) (zero? (1st args))]
-				[(not) (not (1st args))]
-				[(set-car!) (set-car! (1st args) (2nd args))]
-				[(set-cdr!) (set-cdr! (1st args) (2nd args))]
-				[(map) (custom-map (1st args) (2nd args))]
-				[(apply) (apply (lambda (x y) (apply-proc x y env)) (1st args) (cdr args))]
-				[(list-ref) (list-ref (1st args) (2nd args))]
-				[(vector-ref) (vector-ref (1st args) (2nd args))]
-				[(vector) (apply vector args)]
-				[(<) (< (1st args) (2nd args))]
-				[(>) (> (1st args) (2nd args))]
-				[(vector-set!) (vector-set! (1st args) (2nd args) (3rd args))]
-				[(quotient) (quotient (1st args) (2nd args))]
-				[(display) (display (1st args))]
-				[(newline) (newline)]
-				[(symbol->string) (symbol->string (1st args))]
-				[(string->symbol) (string->symbol (1st args))]
-				[(string-append) (apply string-append args)]
-				[(append) (apply append args)]
-				[(list-tail) (list-tail (1st args) (2nd args))]
-				[(assq) (assq (1st args) (2nd args))]
-				[else (error 'apply-prim-proc "Bad primitive procedure name: ~s" prim-proc)]))))
+		(case prim-proc
+			[(+) (apply + args)]
+			[(-) (apply - args)]
+			[(*) (apply * args)]
+			[(/) (apply / args)]
+			[(add1) (+ (1st args) 1)]
+			[(sub1) (- (1st args) 1)]
+			[(cons) (cons (1st args) (2nd args))]
+			[(=) (= (1st args) (2nd args))]
+			[(eq?) (eq? (1st args) (2nd args))]
+			[(eqv?) (eqv? (1st args) (2nd args))]
+			[(equal?) (equal? (1st args) (2nd args))]
+			[(length) (length (1st args))]
+			[(list->vector) (list->vector (1st args))]
+			[(vector->list) (vector->list (1st args))]
+			[(>=) (>= (1st args) (2nd args))]
+			[(<=) (<= (1st args) (2nd args))]
+			[(car) (car (1st args))]
+			[(cdr) (cdr (1st args))]
+			[(caar) (caar (1st args))]
+			[(cadr) (cadr (1st args))]
+			[(cadar) (cadar (1st args))]
+			[(caddr) (caddr (1st args))]
+			[(list) (apply list args)]
+			[(null?) (null? (1st args))]
+			[(list?) (list? (1st args))]
+			[(pair?) (list? (1st args))]
+			[(vector?) (vector? (1st args))]
+			[(number?) (number? (1st args))]
+			[(symbol?) (symbol? (1st args))]
+			[(procedure?) (proc-val? (1st args))]
+			[(zero?) (zero? (1st args))]
+			[(not) (not (1st args))]
+			[(set-car!) (set-car! (1st args) (2nd args))]
+			[(set-cdr!) (set-cdr! (1st args) (2nd args))]
+			[(map) (custom-map (1st args) (2nd args) env)]
+			[(apply) (apply (lambda (x y) (apply-proc x y env)) (1st args) (cdr args))]
+			[(list-ref) (list-ref (1st args) (2nd args))]
+			[(vector-ref) (vector-ref (1st args) (2nd args))]
+			[(vector) (apply vector args)]
+			[(<) (< (1st args) (2nd args))]
+			[(>) (> (1st args) (2nd args))]
+			[(vector-set!) (vector-set! (1st args) (2nd args) (3rd args))]
+			[(quotient) (quotient (1st args) (2nd args))]
+			[(display) (display (1st args))]
+			[(newline) (newline)]
+			[(symbol->string) (symbol->string (1st args))]
+			[(string->symbol) (string->symbol (1st args))]
+			[(string-append) (apply string-append args)]
+			[(append) (apply append args)]
+			[(list-tail) (list-tail (1st args) (2nd args))]
+			[(assq) (assq (1st args) (2nd args))]
+			[else (error 'apply-prim-proc "Bad primitive procedure name: ~s" prim-proc)])))
 
 (define rep      ; "read-eval-print" loop.
 	(lambda ()
@@ -818,7 +854,7 @@
 
 (define eval-one-exp
 	(lambda (x)
-		(top-level-eval (syntax-expand (parse-exp (lexical-address x))))))
+		(top-level-eval (lexical-address (syntax-expand (parse-exp x))))))
 
 
 
