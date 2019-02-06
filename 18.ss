@@ -581,6 +581,19 @@
 
 ; evaluate the list of operands, putting results into a list
 
+(define map-cps
+    (lambda (cps-proc lst k)
+        (if (null? lst)
+            (apply-k k '())
+            (cps-proc 
+                (car lst)
+                (make-k (trace-lambda inner1 (procd-v)
+                    (map-cps 
+                        cps-proc 
+                        (cdr lst) 
+                        (make-k (trace-lambda inner2 (v)
+                            (apply-k k (cons procd-v v)))))))))))
+
 (define eval-rands
 	(lambda (rands env k)
 		(in-order-map (lambda (e) (eval-exp e env (eval-k))) rands)))
