@@ -521,6 +521,16 @@
 	[set!-k
 		(env environment?)
 		(var symbol?)
+		(k continuation?)]
+	[set-ref!-k
+		(value scheme-value?)
+		(k continuation?)]
+	[define-k
+		(name symbol?)
+		(k continuation?)]
+	[eval-body-k
+		(body (list-of expression?))
+		(env environment?)
 		(k continuation?)])
 	
 (define apply-k
@@ -544,15 +554,24 @@
 			[while-k (condition bodies env k)
 				(while-proc condition bodies env k)]
 			[set!-k (env var k)
-				(set-ref! 
-					(apply-env-ref env var k 
-						(lambda ()
-							(apply-env-ref global-env
-								var
-								k
-								(lambda ()
-									(error 'apply-env-ref "variable ~s is not bound" var)))))
-					val)])))
+				(apply-env-ref 
+					env 
+					var 
+					(set-ref!-k val k)
+					(lambda ()
+						(apply-env-ref 
+							global-env
+							var
+							(set-ref!-k val k)
+							(lambda ()
+								(error 'apply-env-ref "variable ~s is not bound" var)))))]
+			[set-ref!-k (value k)
+				(set-ref! val value)]
+			[define-k (name k)
+				(set! global-env (extend-env (list name) val global-env))
+				(apply-k k 'unused)]
+			[eval-body-k (body env k)
+				(eval-body body env k)])))
 
 ; top-level-eval evaluates a form in the global environment
 (define top-level-eval
@@ -595,10 +614,7 @@
 				[set!-exp (var val)
 					(eval-exp val env (set!-k env var k))]
 				[define-exp (name val)
-					(set! global-env (extend-env 
-						(list name)
-						(eval-rands (list val) env)
-						global-env))]
+					(eval-rands (list val) env (define-k name k))]
 				[else (eopl:error 'eval-exp "Bad abstract syntax: ~a" exp)]))))
 
 ; evaluate the list of operands, putting results into a list
@@ -619,9 +635,7 @@
 	(lambda (body env k)
 		(if (null? (cdr body))
 			(eval-exp (car body) env k)
-			(begin
-				(eval-exp (car body) env k)
-				(eval-body (cdr body) env k)))))
+			(eval-exp (car body) env (eval-body-k (cdr body) env k)))))
 
 ;  Apply a procedure to its arguments.
 ;  At this point, we only have primitive procedures.
