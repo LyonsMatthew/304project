@@ -640,7 +640,7 @@
 			[(set-car!) (set-car! (1st args) (2nd args))]
 			[(set-cdr!) (set-cdr! (1st args) (2nd args))]
 			[(map) (custom-map (1st args) (2nd args))]
-			[(apply) (apply apply-proc (1st args) (cdr args))]
+			[(apply) (apply-proc (1st args) (cadr args))]
 			[(list-ref) (list-ref (1st args) (2nd args))]
 			[(vector-ref) (vector-ref (1st args) (2nd args))]
 			[(vector) (apply vector args)]

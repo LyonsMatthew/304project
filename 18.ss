@@ -1,7 +1,7 @@
 ;:  Single-file version of the interpreter.
 ;; Easier to submit to server, probably harder to use in the development process
 
-(load "chez-init.ss")
+(load "C:/304project/chez-init.ss")
 
 ;-------------------+
 ;                   |
@@ -573,7 +573,8 @@
 							(lambda ()
 								(error 'apply-env-ref "variable ~s is not bound" var)))))]
 			[set-ref!-k (value k)
-				(set-ref! val value)]
+				(set-ref! val value)
+				(apply-k k 'unused)]
 			[define-k (name k)
 				(set! global-env (extend-env (list name) val global-env))
 				(apply-k k 'unused)]
