@@ -472,7 +472,7 @@
 ;                   |
 ;-------------------+
 
-(define *prim-proc-names* '(+ - * / add1 sub1 cons = eq? eqv? equal? length list->vector vector->list >= <= car cdr caar cadr cadar caddr list null? list? pair? vector? number? symbol? procedure? zero? not set-car! set-cdr! map apply vector-ref list-ref vector > < vector-set! quotient display newline string->symbol symbol->string string-append append list-tail assq))
+(define *prim-proc-names* '(+ - * / add1 sub1 cons = eq? eqv? equal? length list->vector vector->list >= <= car cdr caar cadr cadar caddr list null? list? pair? vector? number? symbol? procedure? zero? not set-car! set-cdr! map apply vector-ref list-ref vector > < vector-set! quotient display newline string->symbol symbol->string string-append append list-tail assq void))
 
 (define init-env         ; for now, our initial global environment only contains
 	(extend-env
@@ -485,20 +485,16 @@
 (define reset-global-env
     (lambda ()
         (set! global-env init-env)))
-
-; top-level-eval evaluates a form in the global environment
-(define top-level-eval
-	(lambda (form)
-		(eval-exp form (empty-env))))
 		
 (define-datatype continuation continuation?
+	[eval-k]
 	[test-k
 		(then-exp expression?)
 		(else-exp expression?)
 		(env environment?)
 		(k continuation?)]
 	[rator-k
-		(rands (list-of? expression?))
+		(rands (list-of expression?))
 		(env environment?)
 		(k continuation?)]
 	[rands-k
@@ -512,6 +508,7 @@
 (define apply-k
 	(lambda (k val)
 		(cases continuation k
+			[eval-k () val]
 			[test-k (then-exp else-exp env k)
 				(if val
 					(eval-exp then-exp env k)
@@ -521,10 +518,12 @@
 			[rands-k (proc-value k)
 				(apply-proc proc-value val k)]
 			[set!-k (var val k)
-				(
-			
-			
-			)))
+				76543456765])))
+
+; top-level-eval evaluates a form in the global environment
+(define top-level-eval
+	(lambda (form)
+		(eval-exp form (empty-env) (eval-k))))
 
 ; eval-exp is the main component of the interpreter
 
@@ -533,30 +532,27 @@
 		(lambda (exp env k)
 			(cases expression exp
 				[lit-exp (datum) (apply-k k datum)]
-				[quote-exp (body) (eval-exp body env)]
+				[quote-exp (body) (eval-exp body env k)]
 				[var-exp (id)
 					(apply-env env
 						id
-						k
+						identity-proc
 						(lambda ()
 							(apply-env-ref global-env
 								id
 								identity-proc
 								(lambda ()
 									(error 'apply-env "variable ~s is not bound" id)))))]
-				[tiny-list-exp (body) (eval-exp body env)]
+				[tiny-list-exp (body) (eval-exp body env k)]
 				[if-exp (condition body-true body-false)
-					(eval-exp condition
-						env
-						(test-k body-true body-false env k))]
+					(eval-exp condition env (test-k body-true body-false env k))]
 				[if-pirate-exp (condition body-true)
-					(eval-exp condition
-						env
-						(test-k body-true (void) env k))]
+					(eval-exp condition env (test-k body-true (app-exp (list (var-exp 'void))) env k))]
 				[app-exp (body)
-					(eval-exp (car body)
-						env
-						(rator-k (cdr body) env k))]
+					(eval-exp (car body) env (rator-k (cdr body) env k))]
+				[let-exp (vars vals body)
+					(eval-body body
+						(extend-env vars (eval-rands vals env) env))]
 				[lambda-exp (ids body)
 					(apply-k k (closure ids body env))]
 				[lambda-exp-vararg (ids body)
@@ -568,14 +564,14 @@
 				[set!-exp (var val)
 					(set-ref!
                         (apply-env-ref env var
-                            k
+                            identity-proc
                             (lambda ()
                                 (apply-env-ref global-env
                                     var
                                     identity-proc
                                     (lambda ()
                                         (error 'apply-env-ref "variable ~s is not bound" var)))))
-                        (eval-exp val env))]
+                        (eval-exp val env (eval-k)))]
                 [define-exp (name val)
                     (set! global-env (extend-env 
                         (list name)
@@ -586,16 +582,15 @@
 ; evaluate the list of operands, putting results into a list
 
 (define eval-rands
-	(lambda (rands env)
-		(in-order-map (lambda (e) (eval-exp e env) )
-			rands)))
+	(lambda (rands env k)
+		(in-order-map (lambda (e) (eval-exp e env (eval-k))) rands)))
 
 (define eval-body
-	(lambda (body env)
+	(lambda (body env k)
 		(if (null? (cdr body))
-			(eval-exp (car body) env)
+			(eval-exp (car body) env (eval-k))
 			(begin
-				(eval-exp (car body) env)
+				(eval-exp (car body) env (eval-k))
 				(eval-body (cdr body) env)))))
 
 ;  Apply a procedure to its arguments.
@@ -689,6 +684,7 @@
 			[(append) (apply append args)]
 			[(list-tail) (list-tail (1st args) (2nd args))]
             [(assq) (assq (1st args) (2nd args))]
+			[(void) (void)]
 			[else (error 'apply-prim-proc "Bad primitive procedure name: ~s" prim-proc)])))
 
 (define rep      ; "read-eval-print" loop.
