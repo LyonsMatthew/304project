@@ -351,7 +351,7 @@
             [extended-env-record (syms vals env)
                 (let ([pos (list-find-position sym syms)])
                     (if (number? pos)
-                        (succeed (list-ref vals pos))
+                        (apply-k succeed (list-ref vals pos))
                         (apply-env-ref env sym succeed fail)))])))
 
 ;-----------------------+
@@ -457,10 +457,10 @@
                 (cons one two)))))
 
 (define while-proc
-    (lambda (condition bodies env)
-        (if (eval-exp condition env)
+    (lambda (condition bodies env k)
+        (if (eval-exp condition env (eval-k))
             (begin
-                (in-order-map (lambda (b) (eval-exp b env)) bodies)
+                (map-cps (lambda (b k) (eval-exp b env k)) bodies k)
                 (while-proc condition bodies env)
                 (void))
             (void))))
@@ -493,6 +493,13 @@
 		(else-exp expression?)
 		(env environment?)
 		(k continuation?)]
+	[map-inner1-k
+		(cps-proc procedure?)
+		(ls list?)
+		(k continuation?)]
+	[map-inner2-k
+		(procd-v scheme-value?)
+		(k continuation?)]
 	[rator-k
 		(rands (list-of expression?))
 		(env environment?)
@@ -513,6 +520,10 @@
 				(if val
 					(eval-exp then-exp env k)
 					(eval-exp else-exp env k))]
+			[map-inner1-k (cps-proc ls k)
+				(map-cps cps-proc (cdr ls) (map-inner2-k val k))]
+			[map-inner2-k (procd-v k)
+				(apply-k k (cons procd-v val))]
 			[rator-k (rands env k)
 				(eval-rands rands env (rands-k val k))]
 			[rands-k (proc-value k)
@@ -536,11 +547,11 @@
 				[var-exp (id)
 					(apply-env env
 						id
-						identity-proc
+						k
 						(lambda ()
 							(apply-env-ref global-env
 								id
-								identity-proc
+								k
 								(lambda ()
 									(error 'apply-env "variable ~s is not bound" id)))))]
 				[tiny-list-exp (body) (eval-exp body env k)]
@@ -550,17 +561,14 @@
 					(eval-exp condition env (test-k body-true (app-exp (list (var-exp 'void))) env k))]
 				[app-exp (body)
 					(eval-exp (car body) env (rator-k (cdr body) env k))]
-				[let-exp (vars vals body)
-					(eval-body body
-						(extend-env vars (eval-rands vals env) env))]
 				[lambda-exp (ids body)
 					(apply-k k (closure ids body env))]
 				[lambda-exp-vararg (ids body)
-					(closure-varargs ids body env)]
+					(apply-k k (closure-varargs ids body env))]
 				[lambda-exp-improper (ids more-ids body)
-					(closure-improper ids more-ids body env)]
+					(apply-k k (closure-improper ids more-ids body env))]
 				[while-exp (condition bodies)
-					(while-proc condition bodies env)]
+					(while-proc condition bodies env (eval-k))]
 				[set!-exp (var val)
 					(set-ref!
                         (apply-env-ref env var
@@ -585,18 +593,13 @@
     (lambda (cps-proc lst k)
         (if (null? lst)
             (apply-k k '())
-            (cps-proc 
+            (cps-proc
                 (car lst)
-                (make-k (trace-lambda inner1 (procd-v)
-                    (map-cps 
-                        cps-proc 
-                        (cdr lst) 
-                        (make-k (trace-lambda inner2 (v)
-                            (apply-k k (cons procd-v v)))))))))))
+                (map-inner1-k cps-proc lst k)))))
 
 (define eval-rands
 	(lambda (rands env k)
-		(in-order-map (lambda (e) (eval-exp e env (eval-k))) rands)))
+		(map-cps (lambda (e k) (eval-exp e env k)) rands (eval-k))))
 
 (define eval-body
 	(lambda (body env k)
@@ -604,18 +607,18 @@
 			(eval-exp (car body) env (eval-k))
 			(begin
 				(eval-exp (car body) env (eval-k))
-				(eval-body (cdr body) env)))))
+				(eval-body (cdr body) env (eval-k))))))
 
 ;  Apply a procedure to its arguments.
 ;  At this point, we only have primitive procedures.
 ;  User-defined procedures will be added later.
 
 (define apply-proc
-	(lambda (proc-value args)
+	(lambda (proc-value args k)
 		(cases proc-val proc-value
-			[prim-proc (op) (apply-prim-proc op args)]
+			[prim-proc (op) (apply-prim-proc op args (eval-k))]
 			[closure (ids body env)
-				(eval-body body (extend-env ids args env))]
+				(eval-body body (extend-env ids args env) (eval-k))]
 			[closure-varargs (ids body env)
 				(eval-body body (extend-env (list ids) (list args) env))]
 			[closure-improper (ids more-ids body env)
@@ -638,13 +641,13 @@
 ; built-in procedure individually.  We are "cheating" a little bit.
 
 (define custom-map
-	(lambda (proc vals)
+	(lambda (proc vals k)
 		(if (null? vals)
 			'()
-			(cons (apply-proc proc (list (car vals))) (custom-map proc (cdr vals))))))
+			(cons (apply-proc proc (list (car vals)) (eval-k)) (custom-map proc (cdr vals) (eval-k))))))
 
 (define apply-prim-proc
-	(lambda (prim-proc args)
+	(lambda (prim-proc args k)
 		(case prim-proc
 			[(+) (apply + args)]
 			[(-) (apply - args)]
@@ -680,8 +683,8 @@
 			[(not) (not (1st args))]
 			[(set-car!) (set-car! (1st args) (2nd args))]
 			[(set-cdr!) (set-cdr! (1st args) (2nd args))]
-			[(map) (custom-map (1st args) (2nd args))]
-			[(apply) (apply apply-proc (1st args) (cdr args))]
+			[(map) (custom-map (1st args) (2nd args) (eval-k))]
+			[(apply) (apply (lambda (x y) (apply-proc x y (eval-k))) (1st args) (cdr args))]
 			[(list-ref) (list-ref (1st args) (2nd args))]
 			[(vector-ref) (vector-ref (1st args) (2nd args))]
 			[(vector) (apply vector args)]
