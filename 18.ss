@@ -1,7 +1,7 @@
 ;:  Single-file version of the interpreter.
 ;; Easier to submit to server, probably harder to use in the development process
 
-(load "C:/304project/chez-init.ss")
+(load "chez-init.ss")
 
 ;-------------------+
 ;                   |
@@ -531,7 +531,14 @@
 	[eval-body-k
 		(body (list-of expression?))
 		(env environment?)
-		(k continuation?)])
+		(k continuation?)]
+    [custom-map-inner1-k
+        (proc proc-val?)
+        (vals list?)
+        (k continuation?)]
+    [custom-map-inner2-k
+        (procd-v scheme-value?)
+        (k continuation?)])
 	
 (define apply-k
 	(lambda (k val)
@@ -571,7 +578,11 @@
 				(set! global-env (extend-env (list name) val global-env))
 				(apply-k k 'unused)]
 			[eval-body-k (body env k)
-				(eval-body body env k)])))
+				(eval-body body env k)]
+            [custom-map-inner1-k (proc vals k)
+                (apply-proc proc (list (car vals)) (custom-map-inner2-k val k))]
+            [custom-map-inner2-k (procd-v k)
+                (apply-k k (cons val procd-v))])))
 
 ; top-level-eval evaluates a form in the global environment
 (define top-level-eval
@@ -671,8 +682,10 @@
 (define custom-map
 	(lambda (proc vals k)
 		(if (null? vals)
-			'()
-			(cons (apply-proc proc (list (car vals)) (eval-k)) (custom-map proc (cdr vals) (eval-k))))))
+            (apply-k k '())
+            (custom-map proc (cdr vals) (custom-map-inner1-k proc vals k)))))
+;			'()
+;			(cons (apply-proc proc (list (car vals)) (eval-k)) (custom-map proc (cdr vals) (eval-k))))))
 
 (define apply-prim-proc
 	(lambda (prim-proc args k)
@@ -712,8 +725,8 @@
 				[(not) (not (1st args))]
 				[(set-car!) (set-car! (1st args) (2nd args))]
 				[(set-cdr!) (set-cdr! (1st args) (2nd args))]
-				[(map) (custom-map (1st args) (2nd args) (eval-k))]
-				[(apply) (apply (lambda (x y) (apply-proc x y (eval-k))) (1st args) (cdr args))]
+				[(map) (custom-map (1st args) (2nd args) k)]
+				[(apply) (apply-proc (1st args) (cadr args) k)]
 				[(list-ref) (list-ref (1st args) (2nd args))]
 				[(vector-ref) (vector-ref (1st args) (2nd args))]
 				[(vector) (apply vector args)]
