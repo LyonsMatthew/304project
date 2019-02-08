@@ -478,7 +478,7 @@
 ;                   |
 ;-------------------+
 
-(define *prim-proc-names* '(+ - * / add1 sub1 cons = eq? eqv? equal? length list->vector vector->list >= <= car cdr caar cadr cadar caddr list null? list? pair? vector? number? symbol? procedure? zero? not set-car! set-cdr! map apply vector-ref list-ref vector > < vector-set! quotient display newline string->symbol symbol->string string-append append list-tail assq void call/cc))
+(define *prim-proc-names* '(+ - * / add1 sub1 cons = eq? eqv? equal? length list->vector vector->list >= <= car cdr caar cadr cadar caddr list null? list? pair? vector? number? symbol? procedure? zero? not set-car! set-cdr! map apply vector-ref list-ref vector > < vector-set! quotient display newline string->symbol symbol->string string-append append list-tail assq void call/cc exit-list))
 
 (define init-env         ; for now, our initial global environment only contains
 	(extend-env
@@ -540,6 +540,8 @@
         (k continuation?)]
     [custom-map-inner2-k
         (procd-v scheme-value?)
+        (k continuation?)]
+    [exit-k
         (k continuation?)])
 	
 (define apply-k
@@ -585,7 +587,9 @@
             [custom-map-inner1-k (proc vals k)
                 (apply-proc proc (list (car vals)) (custom-map-inner2-k val k))]
             [custom-map-inner2-k (procd-v k)
-                (apply-k k (cons val procd-v))])))
+                (apply-k k (cons val procd-v))]
+            [exit-k (k)
+                val])))
 
 ; top-level-eval evaluates a form in the global environment
 (define top-level-eval
@@ -748,6 +752,7 @@
 				[(assq) (apply-k k (assq (1st args) (2nd args)))]
 				[(void) (apply-k k (void))]
                 [(call/cc) (apply-proc (1st args) (list (continuation-proc k)) k)]
+                [(exit-list) (apply-k (exit-k k) args)]
 				[else (error 'apply-prim-proc "Bad primitive procedure name: ~s" prim-proc)])))
 
 (define rep      ; "read-eval-print" loop.
