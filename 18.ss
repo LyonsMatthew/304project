@@ -114,7 +114,9 @@
 		(ids (list-of symbol?))
 		(more-ids symbol?)
 		(body (list-of expression?))
-		(env environment?)])
+		(env environment?)]
+    [continuation-proc
+        (k continuation?)])
 
 
 
@@ -476,7 +478,7 @@
 ;                   |
 ;-------------------+
 
-(define *prim-proc-names* '(+ - * / add1 sub1 cons = eq? eqv? equal? length list->vector vector->list >= <= car cdr caar cadr cadar caddr list null? list? pair? vector? number? symbol? procedure? zero? not set-car! set-cdr! map apply vector-ref list-ref vector > < vector-set! quotient display newline string->symbol symbol->string string-append append list-tail assq void))
+(define *prim-proc-names* '(+ - * / add1 sub1 cons = eq? eqv? equal? length list->vector vector->list >= <= car cdr caar cadr cadar caddr list null? list? pair? vector? number? symbol? procedure? zero? not set-car! set-cdr! map apply vector-ref list-ref vector > < vector-set! quotient display newline string->symbol symbol->string string-append append list-tail assq void call/cc))
 
 (define init-env         ; for now, our initial global environment only contains
 	(extend-env
@@ -663,6 +665,8 @@
 				(eval-body body (extend-env (list ids) (list args) env) k)]
 			[closure-improper (ids more-ids body env)
 				(eval-body body (extend-env (append ids (list more-ids)) (append (get-proper-args (length ids) args) (list (get-improper-args (length ids) args))) env) k)]
+            [continuation-proc (k)
+                (apply-k k (1st args))]
 			[else (eopl:error 'apply-proc "Attempt to apply bad procedure: ~s" proc-value)])))
 
 (define get-proper-args
@@ -744,6 +748,7 @@
 				[(list-tail) (list-tail (1st args) (2nd args))]
 				[(assq) (assq (1st args) (2nd args))]
 				[(void) (void)]
+                [(call/cc) (apply-proc (1st args) (list (continuation-proc k)) k)]
 				[else (error 'apply-prim-proc "Bad primitive procedure name: ~s" prim-proc)]))))
 
 (define rep      ; "read-eval-print" loop.
